@@ -2,15 +2,12 @@
     ══════════════════════════════════════════════════════════════════════════
     OZEMEN HUB × ANIME DICE
     Discord: https://discord.gg/4Yg72kYT6s
-    Logic: ShowUI=true → UI | ShowUI=false → Overlay
     ══════════════════════════════════════════════════════════════════════════
 ]]
 
--- ═══════ 0. CLEANUP ═══════════════════════════════════════════════════════
 if _G.OzemenCleanup then pcall(_G.OzemenCleanup) end
 _G.OzemenRunning = false
 
--- ★ รอ Config sync
 local waitStart = os.clock()
 while (getgenv().AnimeDiceConfig == nil and getgenv().OzemenConfig == nil) and (os.clock() - waitStart < 3) do
     task.wait(0.05)
@@ -21,18 +18,28 @@ local function cfg(k, d) return (CFG[k] ~= nil) and CFG[k] or d end
 
 local HAS_CONFIG = (type(CFG) == "table") and (next(CFG) ~= nil)
 
+-- ★★★ DEBUG: แสดงค่า ShowUI จริง ๆ
+print("[Ozemen] Config.ShowUI raw value:", tostring(CFG.ShowUI), "type:", type(CFG.ShowUI))
+
+-- ★★★ MODE logic — fix ให้ชัดเจน
 local MODE = "UI"
 if HAS_CONFIG then
-    if CFG.ShowUI == true then
-        MODE = "UI"
-    elseif CFG.ShowUI == false then
+    local showUI = CFG.ShowUI
+    if showUI == false then
         MODE = "OVERLAY"
+    elseif showUI == true then
+        MODE = "UI"
+    elseif showUI == nil then
+        MODE = "UI"
+    else
+        -- ค่าอื่น ๆ (string, number) → ถือว่า UI
+        MODE = "UI"
     end
 end
 
 print("[Ozemen] Mode:", MODE, "| HasConfig:", HAS_CONFIG, "| ShowUI:", tostring(CFG.ShowUI))
 
--- ═══════ 1. SERVICES ══════════════════════════════════════════════════════
+-- ═══════ SERVICES ═══════
 local HttpService      = game:GetService("HttpService")
 local RunService       = game:GetService("RunService")
 local Players          = game:GetService("Players")
@@ -60,7 +67,7 @@ end
 local VirtualInputManager = nil
 pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
 
--- ═══════ 2. NETWORK REMOTES ══════════════════════════════════════════════
+-- ═══════ NETWORK ═══════
 local network = RS:WaitForChild("Network")
 local RollService            = network:WaitForChild("RollService")
 local PlotService            = network:WaitForChild("PlotService")
@@ -85,9 +92,10 @@ local SellNetwork      = network:FindFirstChild("SellService")
 local SellInventoryRF  = SellNetwork and SellNetwork:FindFirstChild("RF") and SellNetwork.RF:FindFirstChild("SellInventory")
 local UpdateAutoSellRE = SellNetwork and SellNetwork:FindFirstChild("RE") and SellNetwork.RE:FindFirstChild("UpdateAutoSell")
 
--- ═══════ 3. MODULES ═══════════════════════════════════════════════════════
+-- ═══════ MODULES ═══════
 local DataController    = require(RS.Framework.Features.Data.DataController)
-local BuffController    = require(RS.Framework.Features.Buffs.BuffController)
+local BuffController    = require(RS.Framework.Features.Buff.BuffController)
+pcall(function() BuffController = require(RS.Framework.Features.Buffs.BuffController) end)
 local UnitUtil          = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil)
 local EntryRegistry     = require(RS.Framework.Features.Inventory.EntryRegistry)
 local TreeStructure     = require(RS.Framework.Features.Upgrades.TreeStructure)
@@ -104,7 +112,7 @@ pcall(function() TowerController = require(RS.Framework.Features.Towers.TowerCon
 local UIReferences    = nil
 pcall(function() UIReferences    = require(RS.Framework.Features.UI.UIReferences) end)
 
--- ═══════ 4. REAL VALUE ACCESSORS ══════════════════════════════════════════
+-- ═══════ ACCESSORS ═══════
 local function getX(key)
     return DataController.___X and DataController.___X[key] or nil
 end
@@ -120,7 +128,7 @@ local function callSignal(name)
     return nil
 end
 
--- ═══════ 5. MAPPINGS ══════════════════════════════════════════════════════
+-- ═══════ MAPPINGS ═══════
 local UpgradeCategories = {
     ["Luck & Fortune"] = {"Luck", "Fortune"},
     ["Roll Speed"]     = {"Roll Speed"},
@@ -144,7 +152,7 @@ local TowerOptions = {"auto","Dragon Tower","Cursed Tower","Pirate Tower","Hidde
 local GradeOrder  = {["D"]=1,["C"]=2,["B"]=3,["A"]=4,["A+"]=5,["S"]=6,["S+"]=7,["Z"]=8,["Z+"]=9,["神"]=10}
 local RarityOrder = {["Common"]=1,["Uncommon"]=2,["Rare"]=3,["Epic"]=4,["Legendary"]=5,["Mythical"]=6,["Secret I"]=7,["Secret"]=7,["Exotic"]=8,["Celestial"]=9,["Divine"]=10,["Exclusive"]=11}
 
--- ═══════ 6. STATE ═════════════════════════════════════════════════════════
+-- ═══════ STATE ═══════
 local State = {
     AntiAFK = cfg("AntiAFK", true),
     FpsBoost = cfg("FpsBoost", true),
@@ -192,7 +200,7 @@ local State = {
     TowerFloorsDone = 0,
 }
 
--- ═══════ 7. CORE LOGIC ════════════════════════════════════════════════════
+-- ═══════ CORE LOGIC ═══════
 local function collectAllSlots()
     pcall(function()
         for slot = 1, 13 do PlotService.RE.CollectBalance:FireServer(slot) end
@@ -457,7 +465,7 @@ function sendDiscordWebhook(title, desc, color, fields)
     end)
 end
 
--- ═══════ 8. ANTI-AFK ══════════════════════════════════════════════════════
+-- ═══════ ANTI-AFK ═══════
 local function neutralizeGameAFK()
     pcall(function()
         local afk = LP.PlayerScripts:FindFirstChild("AFK")
@@ -493,7 +501,7 @@ task.spawn(function()
     end
 end)
 
--- ═══════ 9. FPS BOOST ═════════════════════════════════════════════════════
+-- ═══════ FPS BOOST ═══════
 local function applyFpsBoost()
     if not State.FpsBoost then return end
     pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
@@ -507,7 +515,7 @@ local function applyFpsBoost()
 end
 applyFpsBoost()
 
--- ═══════ 10. AUTOMATION THREADS ═══════════════════════════════════════════
+-- ═══════ AUTOMATION THREADS ═══════
 task.spawn(function()
     while _G.OzemenRunning do
         if State.AutoCollect then collectAllSlots() end
@@ -587,7 +595,7 @@ task.spawn(function()
     end
 end)
 
--- ═══════ 11. AUTO TRADE ═══════════════════════════════════════════════════
+-- ═══════ AUTO TRADE ═══════
 task.spawn(function()
     while _G.OzemenRunning do
         task.wait(5)
@@ -627,7 +635,7 @@ task.spawn(function()
     end
 end)
 
--- ═══════ 12. MOVEMENT ═════════════════════════════════════════════════════
+-- ═══════ MOVEMENT ═══════
 table.insert(_conns, RunService.Stepped:Connect(function()
     if not _G.OzemenRunning then return end
     local char = LP.Character; if not char then return end
@@ -651,7 +659,7 @@ table.insert(_conns, UserInputService.JumpRequest:Connect(function()
 end))
 
 -- ══════════════════════════════════════════════════════════════════════════
---  ═══════ 13. OVERLAY (MODE = "OVERLAY") ═══════════════════════════════
+--  ═══════ OVERLAY (MODE = "OVERLAY") ═══════════════════════════════════
 -- ══════════════════════════════════════════════════════════════════════════
 local overlayGui, panel, overlay = nil, nil, nil
 
@@ -704,7 +712,6 @@ if MODE == "OVERLAY" then
         return string.format("%02d:%02d:%02d", h, m, s)
     end
 
-    -- ★ นับ unit
     local function countUnits()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -715,7 +722,6 @@ if MODE == "OVERLAY" then
         return c
     end
 
-    -- ★ Trait Reroll
     local function getTraitReroll()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -724,7 +730,6 @@ if MODE == "OVERLAY" then
         return 0
     end
 
-    -- ★ Gems
     local function getGems()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -733,7 +738,7 @@ if MODE == "OVERLAY" then
         return 0
     end
 
-    -- ★★★★★★★ รายได้รวม — อ่านจาก UnitInfo.Income บน Workspace ★★★★★★★
+    -- ★★★ รายได้รวม
     local function getBaseIncome()
         local total = 0
         pcall(function()
@@ -741,7 +746,6 @@ if MODE == "OVERLAY" then
             if not plots then return end
             local claimed = plots:FindFirstChild("Claimed")
             if not claimed then return end
-
             for _, plot in ipairs(claimed:GetChildren()) do
                 local slots = plot:FindFirstChild("Slots")
                 if slots then
@@ -780,51 +784,51 @@ if MODE == "OVERLAY" then
         return total
     end
 
-    -- ★★★★★★★ ชั้น Tower — อ่านจาก PlayerGui.Root.Tower.Screen.Floor ★★★★★★★
+    -- ★★★ ชั้น Tower — มี Caching
+    local cachedFloor = "?"
     local function getTowerFloor()
-        local floor = "?"
         pcall(function()
-            -- ★ วิธี 1: อ่านจาก PlayerGui.Root.Tower.Screen.Floor
             local pg = LP:FindFirstChild("PlayerGui")
-            if pg then
-                local root = pg:FindFirstChild("Root")
-                if root then
-                    local tower = root:FindFirstChild("Tower")
-                    if tower then
-                        local screen = tower:FindFirstChild("Screen")
-                        if screen then
-                            local floorLbl = screen:FindFirstChild("Floor")
-                            if floorLbl and floorLbl:IsA("TextLabel") then
-                                local txt = floorLbl.Text or ""
-                                -- Pattern: "Floor 2" → "2"
-                                local num = txt:match("(%d+)")
-                                if num then
-                                    floor = num
-                                    return
-                                end
-                            end
-                        end
+            if not pg then return end
+            local root = pg:FindFirstChild("Root")
+            if not root then return end
+            local tower = root:FindFirstChild("Tower")
+            if not tower then return end
+            local screen = tower:FindFirstChild("Screen")
+            if not screen then return end
+
+            -- ★ วิธี 1: Screen.Floor
+            local floorLbl = screen:FindFirstChild("Floor")
+            if floorLbl and floorLbl:IsA("TextLabel") then
+                local num = floorLbl.Text:match("(%d+)")
+                if num then
+                    cachedFloor = num
+                    return
+                end
+            end
+
+            -- ★ วิธี 2: Screen.Label (fallback)
+            local labelLbl = screen:FindFirstChild("Label")
+            if labelLbl and labelLbl:IsA("TextLabel") then
+                local num = labelLbl.Text:match("(%d+)")
+                if num then
+                    cachedFloor = num
+                    return
+                end
+            end
+
+            -- ★ วิธี 3: หา TextLabel ชื่อ "Floor" ใน Screen
+            for _, child in ipairs(screen:GetDescendants()) do
+                if child:IsA("TextLabel") and child.Name == "Floor" then
+                    local num = child.Text:match("(%d+)")
+                    if num then
+                        cachedFloor = num
+                        return
                     end
                 end
             end
-
-            -- ★ วิธี 2 (fallback): signal
-            local v = callSignal("TowerFloor") or callSignal("CurrentTowerFloor") or callSignal("Floor")
-            if v and type(v) ~= "table" then
-                floor = tostring(v)
-                return
-            end
-
-            -- ★ วิธี 3 (fallback): UIReferences
-            if UIReferences and UIReferences.Root and UIReferences.Root.Tower then
-                local t = UIReferences.Root.Tower
-                if t.Screen and t.Screen.Floor and t.Screen.Floor.Text then
-                    local num = t.Screen.Floor.Text:match("(%d+)")
-                    if num then floor = num end
-                end
-            end
         end)
-        return floor
+        return cachedFloor
     end
 
     local function resolveAutoTowerName()
@@ -858,14 +862,13 @@ if MODE == "OVERLAY" then
                         tradeStatus = "→ " .. table.concat(State.TradeHost, ", ")
                     end
 
-                    -- ★ Tower display: ถ้าอยู่ในโหมด Tower จะแสดงชั้น
                     local towerDisplay
                     if State.AutoTower then
                         local tName = towerName:gsub(" Tower","")
                         if floor ~= "?" then
                             towerDisplay = tName .. " • ชั้น " .. floor
                         else
-                            towerDisplay = tName .. " • ยังไม่เริ่ม"
+                            towerDisplay = tName .. " • รอเริ่ม"
                         end
                     else
                         towerDisplay = "ไม่ฟาร์ม"
@@ -901,7 +904,7 @@ if MODE == "OVERLAY" then
     print("[Ozemen] ✅ Overlay mode: ข้อความกลางจอเท่านั้น")
 end
 
--- ═══════ 14. CONFIG ENGINE ════════════════════════════════════════════════
+-- ═══════ CONFIG ENGINE ═══════
 local ConfigFolder = "Ozemen/AnimeDice"
 local AutoloadFile = ConfigFolder .. "/autoload.txt"
 
@@ -1005,7 +1008,7 @@ local function setAutoloadConfig(configName)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════
---  ═══════ 15. UI (MODE = "UI") ═══════════════════════════════════════════
+--  ═══════ UI (MODE = "UI") ═════════════════════════════════════════════
 -- ══════════════════════════════════════════════════════════════════════════
 if MODE == "UI" then
     local EasyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/VesperHubOnDaTop/Ui/refs/heads/main/UI.lua"))()
@@ -1032,40 +1035,37 @@ if MODE == "UI" then
         end)
     end
 
-    -- ═══ TAB 1: MAIN ═══
     local Main = Window:Tab("หลัก", "zap")
     addSection(Main, "── สุ่มเต๋า ──")
-    Main:Toggle("autoRoll", "สุ่มเต๋าอัตโนมัติ", "สุ่มต่อเนื่อง", State.AutoRoll,
+    Main:Toggle("autoRoll", "สุ่มเต๋าอัตโนมัติ", "", State.AutoRoll,
         function(v) State.AutoRoll = v end)
     addSection(Main, "── จุติ & รางวัล ──")
-    Main:Toggle("autoRebirth", "จุติอัตโนมัติ", "เช็คเงินก่อนยิง", State.AutoRebirth,
+    Main:Toggle("autoRebirth", "จุติอัตโนมัติ", "", State.AutoRebirth,
         function(v) State.AutoRebirth = v end)
-    Main:Slider("rebirthTarget", "เพดานจุติ", "หยุดเมื่อถึงระดับนี้", 1, 100, State.TargetRebirth, 0,
+    Main:Slider("rebirthTarget", "เพดานจุติ", "", 1, 100, State.TargetRebirth, 0,
         function(v) State.TargetRebirth = v end)
-    Main:Toggle("autoClaim", "รับของฟรีทั้งหมด", "Daily / Offline / Spin", State.AutoClaim,
+    Main:Toggle("autoClaim", "รับของฟรีทั้งหมด", "", State.AutoClaim,
         function(v) State.AutoClaim = v end)
     addSection(Main, "── ความปลอดภัย ──")
-    Main:Toggle("antiAFK", "ป้องกันหลุด 24/7", "กันเกมเตะ", State.AntiAFK,
+    Main:Toggle("antiAFK", "ป้องกันหลุด 24/7", "", State.AntiAFK,
         function(v) State.AntiAFK = v end)
-    Main:Toggle("fpsBoost", "FPS Boost", "ลบ effect", State.FpsBoost,
+    Main:Toggle("fpsBoost", "FPS Boost", "", State.FpsBoost,
         function(v) State.FpsBoost = v; if v then applyFpsBoost() end end)
 
-    -- ═══ TAB 2: PLOT ═══
     local Plot = Window:Tab("แท่นเงิน", "home")
     addSection(Plot, "── ดูดเงิน ──")
     Plot:Toggle("autoCollect", "ดูดเงินอัตโนมัติ", "", State.AutoCollect,
         function(v) State.AutoCollect = v end)
-    Plot:Slider("collectInterval", "ความถี่ (วินาที)", "แนะนำ 0.3 – 0.5", 0.1, 5, State.CollectInterval, 1,
+    Plot:Slider("collectInterval", "ความถี่ (วินาที)", "", 0.1, 5, State.CollectInterval, 1,
         function(v) State.CollectInterval = v end)
     addSection(Plot, "── ตัวละคร ──")
     Plot:Toggle("autoEquip", "ใส่ตัวเก่งสุดอัตโนมัติ", "", State.AutoEquipBest,
         function(v) State.AutoEquipBest = v end)
     Plot:Toggle("autoLevel", "อัปเวลอัตโนมัติ", "", State.AutoLevelSlots,
         function(v) State.AutoLevelSlots = v end)
-    Plot:Slider("targetLevel", "เพดานเลเวล", "10 – 150", 10, 150, State.TargetUnitLevel, 0,
+    Plot:Slider("targetLevel", "เพดานเลเวล", "", 10, 150, State.TargetUnitLevel, 0,
         function(v) State.TargetUnitLevel = v end)
 
-    -- ═══ TAB 3: TOWER ═══
     local Tower = Window:Tab("หอคอย", "shield")
     addSection(Tower, "── Auto Tower ──")
     Tower:Dropdown("selectTower", "เลือกหอคอย", TowerOptions, State.SelectedTower, false,
@@ -1075,7 +1075,6 @@ if MODE == "UI" then
     Tower:Toggle("hideTowerScreen", "ซ่อนหน้าจอต่อสู้", "", State.HideTowerScreen,
         function(v) State.HideTowerScreen = v end)
 
-    -- ═══ TAB 4: SELL ═══
     local Sell = Window:Tab("ขายตัว", "trash-2")
     addSection(Sell, "── ขายอัตโนมัติ ──")
     Sell:Toggle("autoSell", "ขายอัตโนมัติ", "", State.AutoSellUnits,
@@ -1083,9 +1082,8 @@ if MODE == "UI" then
     Sell:Slider("sellInterval", "ความถี่สแกน (วินาที)", "", 1, 30, State.SellInterval, 0,
         function(v) State.SellInterval = v end)
     addSection(Sell, "── คัดตัวกากอัตโนมัติ ──")
-    Sell:Toggle("autoFilterTrash", "คัดตัวกากอัตโนมัติ", "ขาย Common/Uncommon/Rare ต่ำกว่า A", State.AutoFilterTrash,
+    Sell:Toggle("autoFilterTrash", "คัดตัวกากอัตโนมัติ", "", State.AutoFilterTrash,
         function(v) State.AutoFilterTrash = v end)
-    addSection(Sell, "── ระดับที่ขาย ──")
     Sell:Dropdown("sellRarity", "เลือก Rarity",
         {"Common","Uncommon","Rare","Epic","Legendary","Mythical"},
         "Common", false,
@@ -1093,20 +1091,17 @@ if MODE == "UI" then
             table.clear(State.SelectedSellRarities)
             if v and v ~= "" then State.SelectedSellRarities[v] = true end
         end)
-    addSection(Sell, "── ป้องกัน ──")
     Sell:Toggle("protectPlot", "ป้องกันตัวบนแท่น", "", State.ProtectPlottedUnits,
         function(v) State.ProtectPlottedUnits = v end)
     Sell:Toggle("protectGradeS", "ป้องกันเกรด S+", "", State.ProtectGradeSPlus,
         function(v) State.ProtectGradeSPlus = v end)
     Sell:Toggle("protectLocked", "ป้องกันตัวที่ล็อคไว้", "", State.ProtectLockedUnits,
         function(v) State.ProtectLockedUnits = v end)
-    addSection(Sell, "── Manual ──")
     Sell:Button("ขายทันที 1 รอบ", "", function()
         local c, e = sellSelectedUnits()
         Window:Notify("ขายตัว", c>0 and string.format("ขาย %d ตัว ได้ $%s", c, NumberFormatter.FormatCompact(e)) or "ไม่พบตัวที่ตรงเงื่อนไข", 3)
     end)
 
-    -- ═══ TAB 5: UPGRADES ═══
     local Upgrades = Window:Tab("อัปเกรด", "arrow-up-circle")
     addSection(Upgrades, "── ซื้ออัปเกรด ──")
     Upgrades:Toggle("autoUpgrades", "ซื้ออัปเกรดอัตโนมัติ", "", State.AutoUpgrades,
@@ -1118,11 +1113,9 @@ if MODE == "UI" then
             table.clear(State.SelectedUpgradeCategories)
             if v and v ~= "" then State.SelectedUpgradeCategories[v] = true end
         end)
-    addSection(Upgrades, "── ลูกเต๋า ──")
     Upgrades:Toggle("autoBuyDice", "ซื้อเต๋าใหม่", "", State.AutoBuyDice,
         function(v) State.AutoBuyDice = v end)
 
-    -- ═══ TAB 6: GRADE ═══
     local Grade = Window:Tab("เกรด", "award")
     local function getInvUnitOptions()
         local opts, map = {}, {}
@@ -1153,10 +1146,9 @@ if MODE == "UI" then
     Grade:Toggle("autoReroll", "เปิดรีเกรดอัตโนมัติ", "", State.AutoRerollGrade,
         function(v) State.AutoRerollGrade = v end)
 
-    -- ═══ TAB 7: MOVE ═══
     local Move = Window:Tab("เคลื่อนที่", "move")
     addSection(Move, "── ความเร็ว ──")
-    Move:Slider("walkSpeed", "ความเร็วเดิน", "16 = ปกติ", 16, 200, State.WalkSpeed, 0,
+    Move:Slider("walkSpeed", "ความเร็วเดิน", "", 16, 200, State.WalkSpeed, 0,
         function(v)
             State.WalkSpeed = v
             if LP.Character then
@@ -1164,7 +1156,7 @@ if MODE == "UI" then
                 if h then h.WalkSpeed = v end
             end
         end)
-    Move:Slider("jumpPower", "แรงกระโดด", "50 = ปกติ", 50, 250, State.JumpPower, 0,
+    Move:Slider("jumpPower", "แรงกระโดด", "", 50, 250, State.JumpPower, 0,
         function(v)
             State.JumpPower = v
             if LP.Character then
@@ -1172,13 +1164,11 @@ if MODE == "UI" then
                 if h then h.JumpPower = v end
             end
         end)
-    addSection(Move, "── ฟีเจอร์ ──")
     Move:Toggle("infJump", "กระโดดไม่จำกัด", "", State.InfJump,
         function(v) State.InfJump = v end)
     Move:Toggle("noclip", "เดินทะลุกำแพง", "", State.Noclip,
         function(v) State.Noclip = v end)
 
-    -- ═══ TAB 8: WEBHOOK ═══
     local Hook = Window:Tab("เว็บฮุก", "send")
     addSection(Hook, "── Discord Webhook ──")
     Hook:Input("webhookURL", "Webhook URL", "", State.WebhookURL,
@@ -1194,12 +1184,11 @@ if MODE == "UI" then
         })
     end)
 
-    -- ═══ TAB 9: TRADE ═══
     local Trade = Window:Tab("เทรด", "repeat")
     addSection(Trade, "── Auto Trade ──")
     Trade:Toggle("autoTrade", "เปิดระบบเทรดอัตโนมัติ", "", State.AutoTrade,
         function(v) State.AutoTrade = v end)
-    Trade:Input("tradeHost", "ชื่อ Host (คั่นด้วย ,)", "เช่น Player1,Player2", table.concat(State.TradeHost or {}, ","),
+    Trade:Input("tradeHost", "ชื่อ Host (คั่นด้วย ,)", "", table.concat(State.TradeHost or {}, ","),
         function(v)
             State.TradeHost = {}
             for name in string.gmatch(v or "", "([^,]+)") do
@@ -1210,13 +1199,12 @@ if MODE == "UI" then
         {"none","keep_slotted","keep_income","all"}, State.TradeSendMode, false,
         function(v) State.TradeSendMode = v end)
 
-    -- ═══ TAB 10: CONFIG ═══
     local Config = Window:Tab("คอนฟิก", "save")
     addSection(Config, "── โปรไฟล์ ──")
     local selectedConfigName = ""
     local newConfigName = "Default"
     local configList = listConfigs()
-    Config:Input("configName", "ชื่อคอนฟิกใหม่", "เช่น Farm_Main", "Default",
+    Config:Input("configName", "ชื่อคอนฟิกใหม่", "", "Default",
         function(v) newConfigName = string.gsub(v or "", "%s+", "") end)
     Config:Button("สร้างคอนฟิกใหม่", "", function()
         local n = newConfigName
@@ -1257,7 +1245,6 @@ if MODE == "UI" then
         Window:Notify("Config", "ยกเลิก AutoLoad เรียบร้อย", 2.5)
     end)
 
-    -- ═══ TAB 11: SETTINGS ═══
     local Settings = Window:Tab("ตั้งค่า", "settings")
     Settings:Settings({ Discord = "https://discord.gg/4Yg72kYT6s" })
     Settings:Button("ปิดสคริปต์ (Unload)", "", function()
@@ -1266,7 +1253,6 @@ if MODE == "UI" then
 
     Window:SelectTab(1)
 
-    -- ═══ MINI BUTTON ═══
     local minGui = Instance.new("ScreenGui")
     minGui.Name = "OzemenMinBtn"
     minGui.ResetOnSpawn = false
@@ -1342,7 +1328,7 @@ if MODE == "UI" then
     print("[Ozemen] ✅ UI mode: หน้าต่าง EasyUI เท่านั้น")
 end
 
--- ═══════ 16. สรุป ═══════
+-- ═══════ สรุป ═══════
 task.spawn(function()
     task.wait(1)
     print("══════════════════════════════════════════════════")
