@@ -10,7 +10,7 @@
 if _G.OzemenCleanup then pcall(_G.OzemenCleanup) end
 _G.OzemenRunning = false
 
--- ★ รอให้ Config sync ก่อน (สูงสุด 3 วินาที)
+-- ★ รอ Config sync
 local waitStart = os.clock()
 while (getgenv().AnimeDiceConfig == nil and getgenv().OzemenConfig == nil) and (os.clock() - waitStart < 3) do
     task.wait(0.05)
@@ -704,7 +704,7 @@ if MODE == "OVERLAY" then
         return string.format("%02d:%02d:%02d", h, m, s)
     end
 
-    -- ★ นับ unit ใน inventory
+    -- ★ นับ unit
     local function countUnits()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -715,7 +715,7 @@ if MODE == "OVERLAY" then
         return c
     end
 
-    -- ★ นับ Trait Reroll
+    -- ★ Trait Reroll
     local function getTraitReroll()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -724,7 +724,7 @@ if MODE == "OVERLAY" then
         return 0
     end
 
-    -- ★ นับ Gems
+    -- ★ Gems
     local function getGems()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -733,7 +733,7 @@ if MODE == "OVERLAY" then
         return 0
     end
 
-    -- ★★★★★★★ รายได้รวม — ดึงจาก UnitInfo.Income บน Workspace ★★★★★★★
+    -- ★★★★★★★ รายได้รวม — อ่านจาก UnitInfo.Income บน Workspace ★★★★★★★
     local function getBaseIncome()
         local total = 0
         pcall(function()
@@ -780,16 +780,47 @@ if MODE == "OVERLAY" then
         return total
     end
 
-    -- ★ ดึงชั้น Tower
+    -- ★★★★★★★ ชั้น Tower — อ่านจาก PlayerGui.Root.Tower.Screen.Floor ★★★★★★★
     local function getTowerFloor()
         local floor = "?"
         pcall(function()
+            -- ★ วิธี 1: อ่านจาก PlayerGui.Root.Tower.Screen.Floor
+            local pg = LP:FindFirstChild("PlayerGui")
+            if pg then
+                local root = pg:FindFirstChild("Root")
+                if root then
+                    local tower = root:FindFirstChild("Tower")
+                    if tower then
+                        local screen = tower:FindFirstChild("Screen")
+                        if screen then
+                            local floorLbl = screen:FindFirstChild("Floor")
+                            if floorLbl and floorLbl:IsA("TextLabel") then
+                                local txt = floorLbl.Text or ""
+                                -- Pattern: "Floor 2" → "2"
+                                local num = txt:match("(%d+)")
+                                if num then
+                                    floor = num
+                                    return
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- ★ วิธี 2 (fallback): signal
             local v = callSignal("TowerFloor") or callSignal("CurrentTowerFloor") or callSignal("Floor")
-            if v and type(v) ~= "table" then floor = tostring(v); return end
+            if v and type(v) ~= "table" then
+                floor = tostring(v)
+                return
+            end
+
+            -- ★ วิธี 3 (fallback): UIReferences
             if UIReferences and UIReferences.Root and UIReferences.Root.Tower then
                 local t = UIReferences.Root.Tower
-                for _, cand in ipairs({t.Floor, t.Stage, t.Level}) do
-                    if cand and cand.Text then floor = cand.Text; return end
+                if t.Screen and t.Screen.Floor and t.Screen.Floor.Text then
+                    local num = t.Screen.Floor.Text:match("(%d+)")
+                    if num then floor = num end
                 end
             end
         end)
@@ -827,7 +858,18 @@ if MODE == "OVERLAY" then
                         tradeStatus = "→ " .. table.concat(State.TradeHost, ", ")
                     end
 
-                    local towerDisplay = (State.AutoTower and (towerName:gsub(" Tower","") .. " • ชั้น " .. floor)) or "ไม่ฟาร์ม"
+                    -- ★ Tower display: ถ้าอยู่ในโหมด Tower จะแสดงชั้น
+                    local towerDisplay
+                    if State.AutoTower then
+                        local tName = towerName:gsub(" Tower","")
+                        if floor ~= "?" then
+                            towerDisplay = tName .. " • ชั้น " .. floor
+                        else
+                            towerDisplay = tName .. " • ยังไม่เริ่ม"
+                        end
+                    else
+                        towerDisplay = "ไม่ฟาร์ม"
+                    end
 
                     overlay.Text = string.format(
                         "<font size='34' color='#FFD54A'>Ozemen Hub</font>\n"..
@@ -1300,7 +1342,7 @@ if MODE == "UI" then
     print("[Ozemen] ✅ UI mode: หน้าต่าง EasyUI เท่านั้น")
 end
 
--- ═══════ 16. รายงานสรุป ═══════
+-- ═══════ 16. สรุป ═══════
 task.spawn(function()
     task.wait(1)
     print("══════════════════════════════════════════════════")
