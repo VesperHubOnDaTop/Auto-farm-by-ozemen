@@ -1,9 +1,9 @@
 --[[
     ══════════════════════════════════════════════════════════════════════════
-    OZEMEN HUB × ANIME DICE — SMART FARM EDITION
+    OZEMEN HUB × ANIME DICE — SMART FARM EDITION v2
     Discord: https://discord.gg/4Yg72kYT6s
     Features: AutoRoll/Collect/Equip/Level/Rebirth/Upgrade/Dice/Claim/Quest/
-              Tower/Sell(Adaptive)/Boost/HideCutscene/Movement/Anti-AFK
+              Tower/Sell(Adaptive Safe)/Boost/HideCutscene/Movement/Anti-AFK
     ══════════════════════════════════════════════════════════════════════════
 ]]
 
@@ -20,14 +20,11 @@ local function cfg(k, d) return (CFG[k] ~= nil) and CFG[k] or d end
 
 local HAS_CONFIG = (type(CFG) == "table") and (next(CFG) ~= nil)
 
-print("[Ozemen] Config.ShowUI:", tostring(CFG.ShowUI), "| type:", type(CFG.ShowUI))
+print("[Ozemen] ShowUI:", tostring(CFG.ShowUI), "| HasConfig:", HAS_CONFIG)
 
 local MODE = "UI"
-if HAS_CONFIG and CFG.ShowUI == false then
-    MODE = "OVERLAY"
-end
-
-print("[Ozemen] Mode:", MODE, "| HasConfig:", HAS_CONFIG)
+if HAS_CONFIG and CFG.ShowUI == false then MODE = "OVERLAY" end
+print("[Ozemen] Mode:", MODE)
 
 -- ═══════ SERVICES ═══════
 local HttpService      = game:GetService("HttpService")
@@ -44,6 +41,9 @@ local Lighting         = game:GetService("Lighting")
 local LP = Players.LocalPlayer
 local _conns = {}
 _G.OzemenRunning = true
+
+-- ★★★ httpRequest — FIX Bug จาก v1
+local httpRequest = (request or http_request or (syn and syn.request) or (http and http.request))
 
 _G.OzemenCleanup = function()
     _G.OzemenRunning = false
@@ -82,13 +82,12 @@ local SellNetwork      = network:FindFirstChild("SellService")
 local SellInventoryRF  = SellNetwork and SellNetwork:FindFirstChild("RF") and SellNetwork.RF:FindFirstChild("SellInventory")
 local UpdateAutoSellRE = SellNetwork and SellNetwork:FindFirstChild("RE") and SellNetwork.RE:FindFirstChild("UpdateAutoSell")
 
--- Quest / Boost
 local QuestNetwork = network:FindFirstChild("QuestService")
 local ClaimQuestRE = QuestNetwork and QuestNetwork:FindFirstChild("RE") and QuestNetwork.RE:FindFirstChild("Claim")
 local BoostNetwork = network:FindFirstChild("BoostService")
 local UseBoostRE   = BoostNetwork and BoostNetwork:FindFirstChild("RE") and BoostNetwork.RE:FindFirstChild("Use")
 
--- ═══════ MODULES (safeRequire) ═══════
+-- ═══════ MODULES ═══════
 local function safeRequire(path)
     if not path then return nil end
     local ok, mod = pcall(function() return require(path) end)
@@ -111,7 +110,8 @@ if not NumberFormatter then
     NumberFormatter = {
         FormatCompact = function(n)
             n = tonumber(n) or 0
-            if n >= 1e12 then return string.format("%.1ft", n/1e12)
+            if n >= 1e15 then return string.format("%.1fqa", n/1e15)
+            elseif n >= 1e12 then return string.format("%.1ft", n/1e12)
             elseif n >= 1e9 then return string.format("%.1fb", n/1e9)
             elseif n >= 1e6 then return string.format("%.1fm", n/1e6)
             elseif n >= 1e3 then return string.format("%.1fk", n/1e3)
@@ -123,11 +123,7 @@ end
 local TowerController = safeRequire(RS.Framework.Features.Towers.TowerController)
 local UIReferences    = safeRequire(RS.Framework.Features.UI.UIReferences)
 
-print("[Ozemen] Modules:",
-    "DC="..tostring(DataController~=nil),
-    "Buff="..tostring(BuffController~=nil),
-    "Dice="..tostring(DiceModule~=nil),
-    "NF="..tostring(NumberFormatter~=nil))
+print("[Ozemen] Modules: DC="..tostring(DataController~=nil).." Buff="..tostring(BuffController~=nil).." Dice="..tostring(DiceModule~=nil))
 
 -- ═══════ ACCESSORS ═══════
 local function getX(key)
@@ -171,7 +167,9 @@ local TowerOptions = {"auto","Dragon Tower","Cursed Tower","Pirate Tower","Hidde
 local GradeOrder  = {["D"]=1,["C"]=2,["B"]=3,["A"]=4,["A+"]=5,["S"]=6,["S+"]=7,["Z"]=8,["Z+"]=9,["神"]=10}
 local RarityOrder = {["Common"]=1,["Uncommon"]=2,["Rare"]=3,["Epic"]=4,["Legendary"]=5,["Mythical"]=6,["Secret I"]=7,["Secret"]=7,["Exotic"]=8,["Celestial"]=9,["Divine"]=10,["Exclusive"]=11}
 
--- ★ Trash Tier System
+-- ══════════════════════════════════════════════════════════════════════════
+--  ★★★ SMART TRASH SYSTEM v2 — ฉลาด + ปลอดภัย 100%
+-- ══════════════════════════════════════════════════════════════════════════
 local TrashTierOrder = {
     "Common","Uncommon","Rare","Epic","Legendary",
     "Mythical","Secret","Exotic","Celestial","Divine","Exclusive"
@@ -179,13 +177,210 @@ local TrashTierOrder = {
 local TrashTierIndex = {}
 for i, t in ipairs(TrashTierOrder) do TrashTierIndex[t] = i end
 
-local TrashState = {
-    currentTier  = cfg("TrashStartTier", "Common"),
-    currentIndex = TrashTierIndex[cfg("TrashStartTier", "Common")] or 1,
-    escalate     = cfg("TrashEscalate", true),
-    upgradeAt    = cfg("TrashUpgradeAt", 5),
-    lastCheck    = 0,
+-- ★ เงินขั้นต่ำต่อ tier — กันไต่เร็วเกิน
+local TrashTierMinMoney = {
+    Common    = 0,
+    Uncommon  = 1e6,      -- 1M
+    Rare      = 1e8,      -- 100M
+    Epic      = 1e10,     -- 10B
+    Legendary = 1e11,     -- 100B
+    Mythical  = 1e12,     -- 1T
+    Secret    = 1e13,     -- 10T
+    Exotic    = 1e14,     -- 100T
+    Celestial = 1e15,     -- 1Qa
+    Divine    = 1e16,     -- 10Qa
+    Exclusive = 1e17,     -- 100Qa
 }
+
+local TrashState = {
+    currentTier  = "Common",
+    currentIndex = 1,
+    escalate     = true,
+    upgradeAt    = cfg("TrashUpgradeAt", 8),
+    lastCheck    = 0,
+    startTier    = cfg("TrashStartTier", "Common"),
+    lastRebirth  = 0,
+}
+
+-- ★ นับจำนวนตาม rarity
+local function countByRarity()
+    local counts = {}
+    local inv = DataController and DataController.Inventory and DataController.Inventory()
+    if type(inv) ~= "table" then return counts end
+    for id, unit in pairs(inv) do
+        if type(unit) == "table" and unit.name and EntryRegistry then
+            local c = EntryRegistry.getEntryConfig(unit.name)
+            local rarity = (c and c.rarity) or "Unknown"
+            counts[rarity] = (counts[rarity] or 0) + 1
+        end
+    end
+    return counts
+end
+
+-- ★ Reset tier เมื่อ rebirth ใหม่
+local function checkRebirthReset()
+    if not DataController then return end
+    local curRebirth = DataController.Rebirth() or 0
+    if curRebirth > TrashState.lastRebirth then
+        TrashState.lastRebirth = curRebirth
+        TrashState.currentIndex = TrashTierIndex[TrashState.startTier] or 1
+        TrashState.currentTier  = TrashState.startTier
+        print("[Trash] 🔄 Rebirth ใหม่ → Reset tier เป็น", TrashState.startTier)
+    end
+end
+
+-- ★ ไต่ tier อัจฉริยะ — ตามเงิน + จำนวน + Min Money Gate
+local function checkTrashEscalate()
+    if not TrashState.escalate then return end
+    if os.clock() - TrashState.lastCheck < 20 then return end
+    TrashState.lastCheck = os.clock()
+
+    checkRebirthReset()
+
+    local counts = countByRarity()
+    local money  = getX("Money") or 0
+
+    -- ★ เริ่มจาก tier ปัจจุบัน
+    local newIdx = TrashState.currentIndex
+
+    -- ★ ไต่ขึ้นได้ทีละ 1 step เท่านั้น
+    for i = TrashState.currentIndex + 1, #TrashTierOrder do
+        local tname = TrashTierOrder[i]
+        local cnt   = counts[tname] or 0
+        local minMoney = TrashTierMinMoney[tname] or 0
+
+        -- ★ ต้องมีทั้งเงิน + จำนวน
+        if cnt >= TrashState.upgradeAt and money >= minMoney then
+            newIdx = i  -- ไต่ได้ทีละ 1
+            break
+        else
+            break  -- ถ้า tier ถัดไปไม่ครบ หยุด
+        end
+    end
+
+    if newIdx > TrashState.currentIndex then
+        local old = TrashState.currentTier
+        TrashState.currentIndex = newIdx
+        TrashState.currentTier  = TrashTierOrder[newIdx] or "Common"
+        print(string.format("[Trash] ⬆️ ไต่ tier: %s → %s (เงิน $%s, มี %d ตัว)",
+            old, TrashState.currentTier,
+            NumberFormatter.FormatCompact(money),
+            counts[TrashState.currentTier] or 0))
+    end
+end
+
+-- ★ Smart Sell — 5 Safety Nets + Minimum Storage Check
+local function sellSelectedUnits()
+    local sold, earned = 0, 0
+    pcall(function()
+        if not SellInventoryRF or not DataController then return end
+        local inv = DataController.Inventory and DataController.Inventory()
+        if not inv then return end
+
+        checkTrashEscalate()
+
+        -- ★ Safety: ตรวจสอบจำนวนในคลัง — ถ้าน้อยกว่า 20 ห้ามขาย
+        local storageUsed = 0
+        for id, unit in pairs(inv) do
+            if type(unit)=="table" and unit.name and unit.attributes then storageUsed = storageUsed + 1 end
+        end
+        if storageUsed < 20 then
+            return  -- ★ คลังเหลือน้อย — หยุดขาย
+        end
+
+        local plotted = {}
+        for slot = 1, 13 do
+            local s = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
+            if s and s.unitId then plotted[s.unitId] = true end
+        end
+        local towerTeam = {}
+        if DataController.TowerTeam then
+            local tt = DataController.TowerTeam()
+            if type(tt)=="table" then
+                for _, uid in pairs(tt) do if type(uid)=="string" then towerTeam[uid]=true end end
+            end
+        end
+
+        local keepIncome = State.SellKeepIncome or 0
+        local currentIdx = TrashState.currentIndex
+
+        local toSell = {}
+        local breakdown = {}
+
+        for id, unit in pairs(inv) do
+            if type(unit)=="table" and unit.name and unit.attributes then
+                local canSell = true
+
+                -- ★ Safety 1: ตัววางแท่น/ทีมหอคอย
+                if State.ProtectPlottedUnits and (plotted[id] or towerTeam[id]) then canSell = false end
+
+                -- ★ Safety 2: ล็อคไว้
+                if State.ProtectLockedUnits and unit.attributes.locked then canSell = false end
+
+                -- ★ Safety 3: เกรด S+ ขึ้นไป
+                if State.ProtectGradeSPlus and unit.attributes.grade then
+                    if (GradeOrder[unit.attributes.grade] or 0) >= 6 then canSell = false end
+                end
+
+                -- ★ Safety 4: income สูง
+                if keepIncome > 0 then
+                    local inc = tonumber(unit.attributes.income) or 0
+                    if inc >= keepIncome then canSell = false end
+                end
+
+                -- ★ Safety 5: Divine / Exclusive — ห้ามขายเด็ดขาด
+                local rarity = "Unknown"
+                if EntryRegistry then
+                    local c = EntryRegistry.getEntryConfig(unit.name)
+                    rarity = (c and c.rarity) or "Unknown"
+                end
+                if rarity == "Divine" or rarity == "Exclusive" then canSell = false end
+
+                -- ★ Safety 6: ถ้าเป็นตัวที่ทำเงินได้เยอะ — เก็บแม้ tier ต่ำ
+                local unitIdx = TrashTierIndex[rarity] or 0
+                local income = tonumber(unit.attributes.income) or 0
+                if income >= 1e8 then canSell = false end  -- 100M/s ขึ้นไป ห้ามขาย
+
+                if canSell then
+                    local shouldSell = false
+
+                    if State.AutoFilterTrash then
+                        -- ★ Smart: ขายถ้า tier ต่ำกว่าปัจจุบัน
+                        if unitIdx > 0 and unitIdx < currentIdx then
+                            shouldSell = true
+                        end
+                    else
+                        for sel, isSel in pairs(State.SelectedSellRarities) do
+                            if isSel and (sel == rarity or string.find(sel, rarity, 1, true)) then
+                                shouldSell = true; break
+                            end
+                        end
+                    end
+
+                    if shouldSell then
+                        table.insert(toSell, id)
+                        breakdown[rarity] = (breakdown[rarity] or 0) + 1
+                        if #toSell >= 50 then break end
+                    end
+                end
+            end
+        end
+
+        if #toSell > 0 then
+            local r1, r2 = SellInventoryRF:InvokeServer(toSell)
+            earned = r1 or 0
+            sold = r2 or #toSell
+
+            local parts = {}
+            for r, c in pairs(breakdown) do table.insert(parts, r.."×"..c) end
+            print(string.format("[Trash] 🗑️ ขาย %d ตัว (เก็บ %s+): %s → $%s",
+                sold, TrashState.currentTier,
+                table.concat(parts, ", "),
+                NumberFormatter.FormatCompact(earned)))
+        end
+    end)
+    return sold, earned
+end
 
 -- ═══════ STATE ═══════
 local State = {
@@ -214,7 +409,7 @@ local State = {
     AutoFilterTrash = cfg("AutoFilterTrash", true),
     SellInterval = 5,
     SellKeepBuffer = cfg("SellKeepBuffer", 6),
-    SellKeepIncome = cfg("SellKeepIncome", 0),
+    SellKeepIncome = cfg("SellKeepIncome", 1e6),   -- ★ Default 1M/s
     SelectedSellRarities = { ["Common"]=true, ["Uncommon"]=true, ["Rare"]=true },
     ProtectPlottedUnits = true,
     ProtectGradeSPlus = true,
@@ -245,9 +440,7 @@ local State = {
     TowerFloorsDone = 0,
 }
 
--- ══════════════════════════════════════════════════════════════════════════
---  CORE LOGIC
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════ CORE LOGIC ═══════
 local function collectAllSlots()
     pcall(function()
         for slot = 1, 13 do PlotService.RE.CollectBalance:FireServer(slot) end
@@ -295,166 +488,6 @@ local function checkAndRebirth()
             RebirthService.RE.Rebirth:FireServer()
         end
     end)
-end
-
--- ★ นับจำนวน unit ตาม rarity
-local function countByRarity()
-    local counts = {}
-    local inv = DataController and DataController.Inventory and DataController.Inventory()
-    if type(inv) ~= "table" then return counts end
-    for id, unit in pairs(inv) do
-        if type(unit) == "table" and unit.name and EntryRegistry then
-            local c = EntryRegistry.getEntryConfig(unit.name)
-            local rarity = (c and c.rarity) or "Unknown"
-            counts[rarity] = (counts[rarity] or 0) + 1
-        end
-    end
-    return counts
-end
-
--- ★ ไต่ tier อัตโนมัติ
-local function checkTrashEscalate()
-    if not TrashState.escalate then return end
-    if os.clock() - TrashState.lastCheck < 15 then return end
-    TrashState.lastCheck = os.clock()
-
-    local counts = countByRarity()
-    local money  = getX("Money") or 0
-
-    local moneyTierIdx = 1
-    if money >= 1e13 then moneyTierIdx = 7
-    elseif money >= 1e12 then moneyTierIdx = 6
-    elseif money >= 1e11 then moneyTierIdx = 5
-    elseif money >= 1e10 then moneyTierIdx = 4
-    elseif money >= 1e9  then moneyTierIdx = 3
-    elseif money >= 1e8  then moneyTierIdx = 2
-    elseif money >= 1e7  then moneyTierIdx = 2
-    elseif money >= 1e6  then moneyTierIdx = 2
-    end
-
-    for i = TrashState.currentIndex + 1, #TrashTierOrder do
-        local tname = TrashTierOrder[i]
-        local cnt   = counts[tname] or 0
-        if cnt >= TrashState.upgradeAt then
-            moneyTierIdx = math.max(moneyTierIdx, i)
-        end
-    end
-
-    if moneyTierIdx > TrashState.currentIndex then
-        local old = TrashState.currentTier
-        TrashState.currentIndex = moneyTierIdx
-        TrashState.currentTier  = TrashTierOrder[moneyTierIdx] or "Common"
-        print(string.format("[Trash] ⬆️ ไต่ tier: %s → %s (เงิน %s)",
-            old, TrashState.currentTier,
-            NumberFormatter.FormatCompact(money)))
-    end
-end
-
--- ★ Smart Sell — ใช้ Trash Tier + 5 Safety Nets
-local function sellSelectedUnits()
-    local sold, earned = 0, 0
-    pcall(function()
-        if not SellInventoryRF or not DataController then return end
-        local inv = DataController.Inventory and DataController.Inventory()
-        if not inv then return end
-
-        checkTrashEscalate()
-
-        local plotted = {}
-        for slot = 1, 13 do
-            local s = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
-            if s and s.unitId then plotted[s.unitId] = true end
-        end
-        local towerTeam = {}
-        if DataController.TowerTeam then
-            local tt = DataController.TowerTeam()
-            if type(tt)=="table" then
-                for _, uid in pairs(tt) do if type(uid)=="string" then towerTeam[uid]=true end end
-            end
-        end
-
-        local storageUsed = 0
-        for id, unit in pairs(inv) do
-            if type(unit)=="table" and unit.name and unit.attributes then storageUsed = storageUsed + 1 end
-        end
-
-        local keepIncome    = State.SellKeepIncome or 0
-        local useTrash      = State.AutoFilterTrash
-        local currentIdx    = TrashState.currentIndex
-
-        local toSell = {}
-        local breakdown = {}
-
-        for id, unit in pairs(inv) do
-            if type(unit)=="table" and unit.name and unit.attributes then
-                local canSell = true
-
-                -- Safety 1: ตัววางแท่น/ทีมหอคอย
-                if State.ProtectPlottedUnits and (plotted[id] or towerTeam[id]) then canSell = false end
-
-                -- Safety 2: ล็อค
-                if State.ProtectLockedUnits and unit.attributes.locked then canSell = false end
-
-                -- Safety 3: เกรด S+
-                if State.ProtectGradeSPlus and unit.attributes.grade then
-                    if (GradeOrder[unit.attributes.grade] or 0) >= 6 then canSell = false end
-                end
-
-                -- Safety 4: income สูง
-                if keepIncome > 0 then
-                    local inc = tonumber(unit.attributes.income) or 0
-                    if inc >= keepIncome then canSell = false end
-                end
-
-                -- Safety 5: Divine / Exclusive
-                local rarity = "Unknown"
-                if EntryRegistry then
-                    local c = EntryRegistry.getEntryConfig(unit.name)
-                    rarity = (c and c.rarity) or "Unknown"
-                end
-                if rarity == "Divine" or rarity == "Exclusive" then canSell = false end
-
-                if canSell then
-                    local unitIdx = TrashTierIndex[rarity] or 0
-                    local shouldSell = false
-
-                    if useTrash then
-                        -- ★ Smart: ขายถ้า tier ต่ำกว่าปัจจุบัน
-                        if unitIdx > 0 and unitIdx < currentIdx then
-                            shouldSell = true
-                        end
-                    else
-                        -- ★ Legacy: ตาม SelectedSellRarities
-                        for sel, isSel in pairs(State.SelectedSellRarities) do
-                            if isSel and (sel == rarity or string.find(sel, rarity, 1, true)) then
-                                shouldSell = true; break
-                            end
-                        end
-                    end
-
-                    if shouldSell then
-                        table.insert(toSell, id)
-                        breakdown[rarity] = (breakdown[rarity] or 0) + 1
-                        if #toSell >= 50 then break end
-                    end
-                end
-            end
-        end
-
-        if #toSell > 0 then
-            local r1, r2 = SellInventoryRF:InvokeServer(toSell)
-            earned = r1 or 0
-            sold = r2 or #toSell
-
-            local parts = {}
-            for r, c in pairs(breakdown) do table.insert(parts, r.."×"..c) end
-            print(string.format("[Trash] 🗑️ ขาย %d ตัว (เก็บ %s+): %s → $%s",
-                sold, TrashState.currentTier,
-                table.concat(parts, ", "),
-                NumberFormatter.FormatCompact(earned)))
-        end
-    end)
-    return sold, earned
 end
 
 local function rollGradeForSelectedUnit()
@@ -546,7 +579,7 @@ local function claimAllFreebies()
     end)
 end
 
--- ★ AutoBoost — ใช้ tier สูงสุดต่อหมวด
+-- ★ AutoBoost — ฉลาดขึ้น
 local function autoUseBoosts()
     pcall(function()
         if not State.AutoBoost then return end
@@ -558,14 +591,21 @@ local function autoUseBoosts()
         local byCategory = {}
         for id, item in pairs(inv) do
             if type(item) == "table" and item.attributes and item.name then
-                local kind = item.attributes.kind or item.attributes.type
-                local isBoost = (kind == "Boost")
-                    or (item.name:lower():find("boost"))
-                    or (item.name:find("Luck") and not item.name:find("Reroll"))
-                    or (item.name:find("Income") and not item.name:find("Unit"))
-                    or (item.name:find("Damage") and not item.name:find("Trait"))
+                -- ★ ใช้ field kind เป็นหลัก
+                local kind = item.attributes.kind
+                local isBoost = (kind == "Boost" or kind == "boost" or kind == "Potion")
+                -- ★ fallback: ตรวจชื่อแบบเข้มงวด
+                if not isBoost then
+                    local n = item.name:lower()
+                    if n:find("boost") and not n:find("trait") then isBoost = true
+                    elseif n:find("luck") and not n:find("reroll") and not n:find("trait") then isBoost = true
+                    elseif n:find("income") and not n:find("unit") then isBoost = true
+                    elseif n:find("damage") and not n:find("trait") and not n:find("dragon damage") then isBoost = true
+                    end
+                end
+
                 if isBoost then
-                    local cat = item.attributes.category or item.name:match("^(%a+)") or "Unknown"
+                    local cat = item.attributes.category or item.name:match("^([%a]+)") or "Unknown"
                     local tier = item.attributes.tier or 0
                     if not byCategory[cat] or tier > byCategory[cat].tier then
                         byCategory[cat] = { id = id, tier = tier, name = item.name }
@@ -576,13 +616,12 @@ local function autoUseBoosts()
 
         for cat, info in pairs(byCategory) do
             UseBoostRE:FireServer(info.id)
-            print(string.format("[Boost] ⚡ ใช้ %s (tier=%d)", info.name, info.tier))
-            task.wait(0.2)
+            task.wait(0.15)
         end
     end)
 end
 
--- ★ AutoQuest
+-- ★ AutoQuest — เช็ค status ก่อน
 local claimedQuests = {}
 local function autoClaimQuests()
     pcall(function()
@@ -711,7 +750,7 @@ task.spawn(function()
     end
 end)
 
--- ═══════ FPS BOOST ═══════
+-- ═══════ FPS BOOST (เต็มรูปแบบ) ═══════
 local function applyFpsBoost()
     if not State.FpsBoost then return end
     pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
@@ -719,6 +758,19 @@ local function applyFpsBoost()
         for _, effect in ipairs(Lighting:GetChildren()) do
             if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
                 effect.Enabled = false
+            end
+        end
+    end)
+    -- ★ ลบ effect/เงา (เก็บพื้น+ยูนิตเรา)
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                if not obj:IsDescendantOf(LP.Character or game) then
+                    obj.CastShadow = false
+                end
+            end
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+                obj.Enabled = false
             end
         end
     end)
@@ -811,16 +863,16 @@ task.spawn(function()
     end
 end)
 
--- ★ AutoBoost Thread
+-- ★ AutoBoost — ทุก 10 วิ (เร็วขึ้น)
 task.spawn(function()
     task.wait(5)
     while _G.OzemenRunning do
         if State.AutoBoost then autoUseBoosts() end
-        task.wait(30)
+        task.wait(10)
     end
 end)
 
--- ★ AutoQuest Thread
+-- ★ AutoQuest — ทุก 15 วิ
 task.spawn(function()
     task.wait(3)
     while _G.OzemenRunning do
@@ -829,11 +881,19 @@ task.spawn(function()
     end
 end)
 
--- ★ HideCutscene Thread
+-- ★ HideCutscene — ทุก 0.5 วิ
 task.spawn(function()
     while _G.OzemenRunning do
         hideCutscene()
         task.wait(0.5)
+    end
+end)
+
+-- ★ Trash Escalate Check — ทุก 20 วิ
+task.spawn(function()
+    while _G.OzemenRunning do
+        checkTrashEscalate()
+        task.wait(20)
     end
 end)
 
@@ -901,7 +961,7 @@ table.insert(_conns, UserInputService.JumpRequest:Connect(function()
 end))
 
 -- ══════════════════════════════════════════════════════════════════════════
---  OVERLAY (MODE = "OVERLAY")
+--  OVERLAY (MODE = "OVERLAY") — ไม่มี Trash Tier
 -- ══════════════════════════════════════════════════════════════════════════
 local overlayGui, panel, overlay = nil, nil, nil
 
@@ -1001,7 +1061,7 @@ if MODE == "OVERLAY" then
                                         local incomeLbl = unitInfo:FindFirstChild("Income")
                                         if incomeLbl and incomeLbl:IsA("TextLabel") then
                                             local txt = incomeLbl.Text or ""
-                                            local val, suffix = txt:match("%$(%d+%.?%d*)([kKmMbBtT]?)%s*/%s*s")
+                                            local val, suffix = txt:match("%$(%d+%.?%d*)([kKmMbBtTqQ]?)%s*/%s*s")
                                             if val then
                                                 local num = tonumber(val) or 0
                                                 suffix = (suffix or ""):lower()
@@ -1010,6 +1070,7 @@ if MODE == "OVERLAY" then
                                                 elseif suffix == "m" then mult = 1e6
                                                 elseif suffix == "b" then mult = 1e9
                                                 elseif suffix == "t" then mult = 1e12
+                                                elseif suffix == "q" then mult = 1e15
                                                 end
                                                 total = total + (num * mult)
                                             end
@@ -1095,6 +1156,7 @@ if MODE == "OVERLAY" then
                         towerDisplay = "ไม่ฟาร์ม"
                     end
 
+                    -- ★ ไม่มี Trash Tier ใน Overlay
                     overlay.Text = string.format(
                         "<font size='34' color='#FFD54A'>Ozemen Hub</font>\n"..
                         "<font size='20' color='#00E5FF'>Status: กำลังฟาร์ม | รันมา %s</font>\n"..
@@ -1106,11 +1168,9 @@ if MODE == "OVERLAY" then
                         "🗼 Tower: <font color='#A0E7FF'>%s</font>\n"..
                         "📦 Storage: <font color='#FF7AD9'>%d / 150</font>\n"..
                         "🎰 Rolls: <font color='#FFD700'>%d</font>\n"..
-                        "🗑️ Trash Tier: <font color='#FF7AD9'>%s</font>\n"..
                         "🤝 Trade: <font color='#A0E7FF'>%s</font>",
                         runtime, moneyStr, incomeStr, gems, traitReroll,
-                        rebirth, dice, towerDisplay, unitCount, rolls,
-                        TrashState.currentTier, tradeStatus
+                        rebirth, dice, towerDisplay, unitCount, rolls, tradeStatus
                     )
                 end)
             end
@@ -1124,7 +1184,7 @@ if MODE == "OVERLAY" then
         end
     end)
 
-    print("[Ozemen] ✅ Overlay mode: ข้อความกลางจอ")
+    print("[Ozemen] ✅ Overlay mode")
 end
 
 -- ═══════ CONFIG ENGINE ═══════
@@ -1262,7 +1322,7 @@ if MODE == "UI" then
     addSection(Main, "── สุ่มเต๋า ──")
     Main:Toggle("autoRoll", "สุ่มเต๋าอัตโนมัติ", "", State.AutoRoll,
         function(v) State.AutoRoll = v end)
-    Main:Toggle("hideCutscene", "ซ่อน Cutscene 1-in-X", "เพิ่มความเร็ว roll", State.HideCutscene,
+    Main:Toggle("hideCutscene", "ซ่อน Cutscene 1-in-X", "", State.HideCutscene,
         function(v) State.HideCutscene = v end)
     addSection(Main, "── จุติ & รางวัล ──")
     Main:Toggle("autoRebirth", "จุติอัตโนมัติ", "", State.AutoRebirth,
@@ -1304,7 +1364,6 @@ if MODE == "UI" then
     Tower:Toggle("hideTowerScreen", "ซ่อนหน้าจอต่อสู้", "", State.HideTowerScreen,
         function(v) State.HideTowerScreen = v end)
 
-    -- ★ SELL Tab with Trash Tier
     local Sell = Window:Tab("ขายตัว", "trash-2")
     addSection(Sell, "── ขายอัตโนมัติ ──")
     Sell:Toggle("autoSell", "ขายอัตโนมัติ", "", State.AutoSellUnits,
@@ -1312,22 +1371,13 @@ if MODE == "UI" then
     Sell:Slider("sellInterval", "ความถี่สแกน (วินาที)", "", 1, 30, State.SellInterval, 0,
         function(v) State.SellInterval = v end)
 
-    addSection(Sell, "── ★ Smart Trash (ไต่ Tier) ──")
-    Sell:Toggle("autoFilterTrash", "เปิดระบบไต่ Tier", "ขายตัวที่ tier ต่ำกว่าให้อัตโนมัติ", State.AutoFilterTrash,
+    addSection(Sell, "── Smart Trash ──")
+    Sell:Toggle("autoFilterTrash", "เปิดไต่ Tier อัตโนมัติ", "ขายตัวที่ tier ต่ำกว่า (มี Min Money + Min Count)", State.AutoFilterTrash,
         function(v) State.AutoFilterTrash = v end)
-    Sell:Slider("trashUpgradeAt", "ไต่ tier เมื่อมี", "ตัวใน tier ถัดไป (5 = มี 5 ตัว → ไต่)", 3, 20, TrashState.upgradeAt, 0,
+    Sell:Slider("trashUpgradeAt", "ไต่ tier เมื่อมี", "ตัวใน tier ถัดไป", 3, 20, TrashState.upgradeAt, 0,
         function(v) TrashState.upgradeAt = v end)
 
-    addSection(Sell, "── ระดับที่ขาย (Legacy) ──")
-    Sell:Dropdown("sellRarity", "เลือก Rarity",
-        {"Common","Uncommon","Rare","Epic","Legendary","Mythical"},
-        "Common", false,
-        function(v)
-            table.clear(State.SelectedSellRarities)
-            if v and v ~= "" then State.SelectedSellRarities[v] = true end
-        end)
-
-    addSection(Sell, "── Safety Nets ──")
+    addSection(Sell, "── Safety ──")
     Sell:Toggle("protectPlot", "ป้องกันตัวบนแท่น", "", State.ProtectPlottedUnits,
         function(v) State.ProtectPlottedUnits = v end)
     Sell:Toggle("protectGradeS", "ป้องกันเกรด S+", "", State.ProtectGradeSPlus,
@@ -1562,7 +1612,7 @@ if MODE == "UI" then
         end)
     end)
 
-    Window:Notify("Ozemen Hub", "Anime Dice + Smart Farm | discord.gg/4Yg72kYT6s", 5)
+    Window:Notify("Ozemen Hub", "Anime Dice + Smart Farm v2 | discord.gg/4Yg72kYT6s", 5)
 
     print("[Ozemen] ✅ UI mode")
 end
@@ -1572,6 +1622,6 @@ task.spawn(function()
     task.wait(1)
     print("══════════════════════════════════════════════════")
     print("  [Ozemen] โหมด:", MODE)
-    print("  [Ozemen] Trash Tier เริ่มต้น:", TrashState.currentTier)
+    print("  [Ozemen] Smart Trash Filter v2 — พร้อมใช้งาน")
     print("══════════════════════════════════════════════════")
 end)
