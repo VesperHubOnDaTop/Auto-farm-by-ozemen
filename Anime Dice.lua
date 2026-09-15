@@ -2,7 +2,7 @@
     ══════════════════════════════════════════════════════════════════════════
     OZEMEN HUB × ANIME DICE
     Discord: https://discord.gg/4Yg72kYT6s
-    Logic: ShowUI=true → UI เท่านั้น | ShowUI=false → Overlay เท่านั้น
+    Logic: ShowUI=true → UI | ShowUI=false → Overlay
     ══════════════════════════════════════════════════════════════════════════
 ]]
 
@@ -10,26 +10,23 @@
 if _G.OzemenCleanup then pcall(_G.OzemenCleanup) end
 _G.OzemenRunning = false
 
--- ★ รอให้ Config sync จาก getgenv() ก่อน (สูงสุด 3 วินาที)
+-- ★ รอให้ Config sync ก่อน (สูงสุด 3 วินาที)
 local waitStart = os.clock()
 while (getgenv().AnimeDiceConfig == nil and getgenv().OzemenConfig == nil) and (os.clock() - waitStart < 3) do
     task.wait(0.05)
 end
 
--- ★ Config
 local CFG = getgenv().AnimeDiceConfig or getgenv().OzemenConfig or {}
 local function cfg(k, d) return (CFG[k] ~= nil) and CFG[k] or d end
 
--- ★ ตรวจสอบว่ามี Config จริงหรือไม่ (table + มี key)
 local HAS_CONFIG = (type(CFG) == "table") and (next(CFG) ~= nil)
 
--- ★ ตัดสินใจโหมด
-local MODE = "UI"    -- default: รันสคริปต์เฉยๆ → UI
+local MODE = "UI"
 if HAS_CONFIG then
     if CFG.ShowUI == true then
-        MODE = "UI"          -- ShowUI = true → UI เท่านั้น
+        MODE = "UI"
     elseif CFG.ShowUI == false then
-        MODE = "OVERLAY"     -- ShowUI = false → Overlay เท่านั้น
+        MODE = "OVERLAY"
     end
 end
 
@@ -654,7 +651,7 @@ table.insert(_conns, UserInputService.JumpRequest:Connect(function()
 end))
 
 -- ══════════════════════════════════════════════════════════════════════════
---  ═══════ 13. OVERLAY (สร้างเฉพาะ MODE = "OVERLAY") ═══════════════════════
+--  ═══════ 13. OVERLAY (MODE = "OVERLAY") ═══════════════════════════════
 -- ══════════════════════════════════════════════════════════════════════════
 local overlayGui, panel, overlay = nil, nil, nil
 
@@ -707,6 +704,7 @@ if MODE == "OVERLAY" then
         return string.format("%02d:%02d:%02d", h, m, s)
     end
 
+    -- ★ นับ unit ใน inventory
     local function countUnits()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -717,6 +715,7 @@ if MODE == "OVERLAY" then
         return c
     end
 
+    -- ★ นับ Trait Reroll
     local function getTraitReroll()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -725,6 +724,7 @@ if MODE == "OVERLAY" then
         return 0
     end
 
+    -- ★ นับ Gems
     local function getGems()
         local inv = getX("Inventory")
         if type(inv) ~= "table" then return 0 end
@@ -733,34 +733,54 @@ if MODE == "OVERLAY" then
         return 0
     end
 
+    -- ★★★★★★★ รายได้รวม — ดึงจาก UnitInfo.Income บน Workspace ★★★★★★★
     local function getBaseIncome()
         local total = 0
         pcall(function()
-            local slots = getX("Slots")
-            local inv = getX("Inventory")
-            if type(slots) ~= "table" or type(inv) ~= "table" then return end
-            for _, slotData in pairs(slots) do
-                if type(slotData) == "table" and slotData.unitId then
-                    local unit = inv[slotData.unitId]
-                    if type(unit) == "table" and unit.attributes then
-                        local inc = tonumber(unit.attributes.income)
-                            or tonumber(unit.attributes.moneyPerSecond)
-                            or 0
-                        total = total + inc
+            local plots = workspace:FindFirstChild("Plots")
+            if not plots then return end
+            local claimed = plots:FindFirstChild("Claimed")
+            if not claimed then return end
+
+            for _, plot in ipairs(claimed:GetChildren()) do
+                local slots = plot:FindFirstChild("Slots")
+                if slots then
+                    for _, slot in ipairs(slots:GetChildren()) do
+                        for _, unit in ipairs(slot:GetChildren()) do
+                            local hrp = unit:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                local info = hrp:FindFirstChild("Info")
+                                if info then
+                                    local unitInfo = info:FindFirstChild("UnitInfo")
+                                    if unitInfo then
+                                        local incomeLbl = unitInfo:FindFirstChild("Income")
+                                        if incomeLbl and incomeLbl:IsA("TextLabel") then
+                                            local txt = incomeLbl.Text or ""
+                                            local val, suffix = txt:match("%$(%d+%.?%d*)([kKmMbBtT]?)%s*/%s*s")
+                                            if val then
+                                                local num = tonumber(val) or 0
+                                                suffix = (suffix or ""):lower()
+                                                local mult = 1
+                                                if suffix == "k" then mult = 1e3
+                                                elseif suffix == "m" then mult = 1e6
+                                                elseif suffix == "b" then mult = 1e9
+                                                elseif suffix == "t" then mult = 1e12
+                                                end
+                                                total = total + (num * mult)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
                     end
-                end
-            end
-            local reb = getX("Rebirth") or 0
-            if type(RebirthsModule.Get) == "function" then
-                local ok, data = pcall(RebirthsModule.Get, reb)
-                if ok and type(data) == "table" and data.moneyMultiplier then
-                    total = total * data.moneyMultiplier
                 end
             end
         end)
         return total
     end
 
+    -- ★ ดึงชั้น Tower
     local function getTowerFloor()
         local floor = "?"
         pcall(function()
@@ -836,7 +856,7 @@ if MODE == "OVERLAY" then
         end
     end)
 
-    print("[Ozemen] ✅ Overlay mode: ข้อความกลางจอเท่านั้น (ไม่มี UI)")
+    print("[Ozemen] ✅ Overlay mode: ข้อความกลางจอเท่านั้น")
 end
 
 -- ═══════ 14. CONFIG ENGINE ════════════════════════════════════════════════
@@ -943,7 +963,7 @@ local function setAutoloadConfig(configName)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════
---  ═══════ 15. UI (สร้างเฉพาะ MODE = "UI") ═══════════════════════════════
+--  ═══════ 15. UI (MODE = "UI") ═══════════════════════════════════════════
 -- ══════════════════════════════════════════════════════════════════════════
 if MODE == "UI" then
     local EasyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/VesperHubOnDaTop/Ui/refs/heads/main/UI.lua"))()
@@ -1277,19 +1297,18 @@ if MODE == "UI" then
 
     Window:Notify("Ozemen Hub", "Anime Dice พร้อมใช้งาน | discord.gg/4Yg72kYT6s", 5)
 
-    print("[Ozemen] ✅ UI mode: หน้าต่าง EasyUI เท่านั้น (ไม่มี Overlay)")
+    print("[Ozemen] ✅ UI mode: หน้าต่าง EasyUI เท่านั้น")
 end
 
--- ═══════ 16. รายงานสรุปโหมด ═══════
+-- ═══════ 16. รายงานสรุป ═══════
 task.spawn(function()
     task.wait(1)
     print("══════════════════════════════════════════════════")
-    print("  [Ozemen] สรุปโหมดที่ใช้งาน")
-    print("  MODE:", MODE)
+    print("  [Ozemen] สรุปโหมด:", MODE)
     if MODE == "UI" then
-        print("  → แสดง UI เท่านั้น (ไม่มี Overlay)")
+        print("  → แสดง UI (ไม่มี Overlay)")
     elseif MODE == "OVERLAY" then
-        print("  → แสดง Overlay กลางจอเท่านั้น (ไม่มี UI)")
+        print("  → แสดง Overlay กลางจอ (ไม่มี UI)")
     end
     print("══════════════════════════════════════════════════")
 end)
