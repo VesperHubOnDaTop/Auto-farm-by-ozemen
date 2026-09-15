@@ -12,6 +12,7 @@
     ShowUI          = false   -- true=เปิด UI  | false=Overlay กลางจอ
     AntiAFK         = true    -- ป้องกันหลุด 24/7
     FpsBoost        = true    -- ลดคุณภาพกราฟิก เพิ่ม FPS
+    UltraFpsBoost   = false   -- 🔥 ลบทุกอย่างในแมพ เหลือแค่เพลตเรา (FPS ขั้นสุด)
     HideCutscene    = true    -- ซ่อน Cutscene สุ่มเต๋า
 
     -- แท่นเงิน / สุ่มเต๋า
@@ -493,6 +494,7 @@ end
 local State = {
     AntiAFK = cfg("AntiAFK", true),
     FpsBoost = cfg("FpsBoost", true),
+    UltraFpsBoost = cfg("UltraFpsBoost", false),
     HideCutscene = cfg("HideCutscene", true),
 
     AutoRoll = cfg("AutoRoll", true),
@@ -872,6 +874,124 @@ local function applyFpsBoost()
     end)
 end
 applyFpsBoost()
+
+-- ═══════ ULTRA FPS BOOST — ลบทุกอย่างเหลือแค่ Plot ═══════
+-- ลบ/ซ่อนทุกอย่างใน workspace ยกเว้น Plots + ตัวเรา เพื่อ FPS แบบขั้นสุด
+local function isOurPlotModel(child)
+    -- เช็คว่าเป็น plot เราจริงไหม (กันลบเพลตตัวเอง)
+    local mine = false
+    pcall(function()
+        local ownerAttr = child:GetAttribute("Owner")
+        if ownerAttr ~= nil then
+            mine = tostring(ownerAttr) == tostring(LP.Name)
+        end
+    end)
+    if mine then return true end
+    local ownerLbl = child:FindFirstChild("OwnerName") or child:FindFirstChild("Owner")
+    return ownerLbl and tostring(ownerLbl.Value) == tostring(LP.Name)
+end
+
+local function hideInstanceUltra(inst)
+    pcall(function()
+        if inst:IsA("Model") then
+            for _, part in ipairs(inst:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.Transparency = 1
+                    part.CanCollide = false
+                    part.CanQuery = false
+                    part.CastShadow = false
+                elseif part:IsA("ParticleEmitter") or part:IsA("Trail") or part:IsA("Beam") or part:IsA("Fire") or part:IsA("Smoke") or part:IsA("Sparkles") then
+                    part.Enabled = false
+                elseif part:IsA("Decal") or part:IsA("Texture") then
+                    pcall(function() part.Transparency = 1 end)
+                end
+            end
+        elseif inst:IsA("BasePart") then
+            inst.Transparency = 1
+            inst.CanCollide = false
+            inst.CanQuery = false
+            inst.CastShadow = false
+        elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") then
+            inst.Enabled = false
+        end
+    end)
+end
+
+local function ultraFpsBoost()
+    if not State.UltraFpsBoost then return end
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+    pcall(function()
+        for _, effect in ipairs(Lighting:GetChildren()) do
+            if effect:IsA("PostEffect") then effect.Enabled = false end
+        end
+        if Lighting:FindFirstChildOfClass("Atmosphere") then Lighting:FindFirstChildOfClass("Atmosphere").Enabled = false end
+        if Lighting:FindFirstChildOfClass("Sky") then Lighting:FindFirstChildOfClass("Sky").Parent = nil end
+    end)
+    pcall(function()
+        if workspace:FindFirstChildOfClass("Terrain") then
+            workspace:FindFirstChildOfClass("Terrain").WaterWaveSize = 0
+            workspace:FindFirstChildOfClass("Terrain").WaterWaveSpeed = 0
+            workspace:FindFirstChildOfClass("Terrain").WaterTransparency = 1
+        end
+    end)
+end
+
+-- nuke ทั้งหมด ยกเว้น Terrain + Plots (ลบผู้เล่นอื่น/โมเดลขยะ + ซ่อนของใน Folder แมพ)
+local function ultraNukeAll()
+    if not State.UltraFpsBoost then return end
+    pcall(function()
+        for _, child in ipairs(workspace:GetChildren()) do
+            local keep = child == workspace.Terrain or child.Name == "Plots"
+            if not keep then
+                local isOurs = LP.Character and (child == LP.Character or child:IsDescendantOf(LP.Character))
+                if isOurs then
+                    -- ตัวเรา — ข้าม
+                elseif child:IsA("Model") then
+                    pcall(function() child:Destroy() end)
+                elseif child:IsA("Folder") then
+                    -- ซ่อนทุกอย่างใน folder แมพ (Map, Players, Leaderboards, ...)
+                    for _, part in ipairs(child:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.Transparency = 1
+                            part.CanCollide = false
+                            part.CanQuery = false
+                            part.CastShadow = false
+                        elseif part:IsA("ParticleEmitter") or part:IsA("Trail") or part:IsA("Beam") or part:IsA("Fire") or part:IsA("Smoke") or part:IsA("Sparkles") then
+                            part.Enabled = false
+                        elseif part:IsA("Decal") or part:IsA("Texture") then
+                            pcall(function() part.Transparency = 1 end)
+                        end
+                    end
+                elseif child:IsA("BasePart") then
+                    child.Transparency = 1
+                    child.CanCollide = false
+                    child.CastShadow = false
+                end
+            end
+        end
+    end)
+end
+
+-- วนลบ/ซ่อนของใหม่ที่โผล่เข้ามาเรื่อยๆ + ซ่อน plot คนอื่น (กัน FPS drop)
+task.spawn(function()
+    while _G.OzemenRunning do
+        if State.UltraFpsBoost then
+            ultraFpsBoost()
+            ultraNukeAll()
+            pcall(function()
+                local plots = workspace:FindFirstChild("Plots")
+                if plots then
+                    for _, sub in ipairs(plots:GetChildren()) do
+                        if sub:IsA("Model") and not isOurPlotModel(sub) then
+                            hideInstanceUltra(sub)
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(5)
+    end
+end)
 
 -- ═══════ AUTOMATION THREADS ═══════
 task.spawn(function()
@@ -1435,6 +1555,8 @@ if MODE == "UI" then
         function(v) State.AntiAFK = v end)
     Main:Toggle("fpsBoost", "FPS Boost", "", State.FpsBoost,
         function(v) State.FpsBoost = v; if v then applyFpsBoost() end end)
+    Main:Toggle("ultraFpsBoost", "Ultra FPS (ลบทุกอย่างเหลือ Plot)", "ลบทุกอย่างยกเว้นเพลตเรา — FPS ขั้นสุด", State.UltraFpsBoost,
+        function(v) State.UltraFpsBoost = v; if v then ultraFpsBoost(); ultraNukeAll() end end)
 
     local Plot = Window:Tab("แท่นเงิน", "home")
     addSection(Plot, "── ดูดเงิน ──")
