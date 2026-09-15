@@ -10,24 +10,30 @@
 if _G.OzemenCleanup then pcall(_G.OzemenCleanup) end
 _G.OzemenRunning = false
 
+-- ★ รอให้ Config sync จาก getgenv() ก่อน (สูงสุด 3 วินาที)
+local waitStart = os.clock()
+while (getgenv().AnimeDiceConfig == nil and getgenv().OzemenConfig == nil) and (os.clock() - waitStart < 3) do
+    task.wait(0.05)
+end
+
 -- ★ Config
 local CFG = getgenv().AnimeDiceConfig or getgenv().OzemenConfig or {}
 local function cfg(k, d) return (CFG[k] ~= nil) and CFG[k] or d end
 
--- ★ ตรวจสอบว่า "มี config" หรือ "รันเฉยๆ"
-local HAS_CONFIG = (getgenv().AnimeDiceConfig ~= nil) or (getgenv().OzemenConfig ~= nil)
+-- ★ ตรวจสอบว่ามี Config จริงหรือไม่ (table + มี key)
+local HAS_CONFIG = (type(CFG) == "table") and (next(CFG) ~= nil)
 
 -- ★ ตัดสินใจโหมด
-local MODE = "UI"        -- default: รันสคริปต์เฉยๆ → แสดง UI
+local MODE = "UI"    -- default: รันสคริปต์เฉยๆ → UI
 if HAS_CONFIG then
-    if cfg("ShowUI", true) then
-        MODE = "UI"      -- ShowUI = true → UI เท่านั้น
-    else
-        MODE = "OVERLAY" -- ShowUI = false → Overlay เท่านั้น
+    if CFG.ShowUI == true then
+        MODE = "UI"          -- ShowUI = true → UI เท่านั้น
+    elseif CFG.ShowUI == false then
+        MODE = "OVERLAY"     -- ShowUI = false → Overlay เท่านั้น
     end
 end
 
-print("[Ozemen] Mode:", MODE, "| HasConfig:", HAS_CONFIG)
+print("[Ozemen] Mode:", MODE, "| HasConfig:", HAS_CONFIG, "| ShowUI:", tostring(CFG.ShowUI))
 
 -- ═══════ 1. SERVICES ══════════════════════════════════════════════════════
 local HttpService      = game:GetService("HttpService")
@@ -145,7 +151,6 @@ local RarityOrder = {["Common"]=1,["Uncommon"]=2,["Rare"]=3,["Epic"]=4,["Legenda
 local State = {
     AntiAFK = cfg("AntiAFK", true),
     FpsBoost = cfg("FpsBoost", true),
-
     AutoRoll = cfg("AutoRoll", true),
     AutoCollect = cfg("AutoCollect", true),
     CollectInterval = cfg("CollectInterval", 0.5),
@@ -153,7 +158,6 @@ local State = {
     EquipInterval = 3.0,
     AutoLevelSlots = cfg("AutoLevelUnit", true),
     TargetUnitLevel = cfg("MaxUnitLevel", 20),
-
     AutoRebirth = cfg("AutoRebirth", true),
     TargetRebirth = cfg("RebirthTarget", 999),
     AutoUpgrades = cfg("AutoUpgrade", true),
@@ -162,7 +166,6 @@ local State = {
     AutoQuest = cfg("AutoQuest", true),
     AutoBoost = cfg("AutoBoost", true),
     SelectedUpgradeCategories = { ["Luck & Fortune"]=true, ["Roll Speed"]=true, ["Money"]=true },
-
     AutoSellUnits = cfg("AutoSell", true),
     AutoFilterTrash = cfg("AutoFilterTrash", true),
     SellInterval = 5,
@@ -172,28 +175,22 @@ local State = {
     ProtectPlottedUnits = true,
     ProtectGradeSPlus = true,
     ProtectLockedUnits = true,
-
     AutoRerollGrade = false,
     TargetGradeUnitKey = "",
     TargetGrade = "S",
     GradeRollDelay = 0.35,
-
     WebhookURL = cfg("WebhookURL", ""),
     WebhookEnabled = cfg("WebhookEnabled", false),
-
     AutoTower = cfg("AutoTower", true),
     SelectedTower = cfg("TowerMode", "auto"),
     HideTowerScreen = true,
-
     WalkSpeed = 16,
     JumpPower = 50,
     InfJump = false,
     Noclip = false,
-
     AutoTrade = cfg("AutoTrade", false),
     TradeHost = cfg("TradeHost", {}),
     TradeSendMode = cfg("TradeSendMode", "none"),
-
     SessionStart = os.clock(),
     TowerFloorsDone = 0,
 }
@@ -703,7 +700,6 @@ if MODE == "OVERLAY" then
     overlay.Visible = true
     overlay.Parent = panel
 
-    -- Update loop
     local function formatTime(sec)
         local h = math.floor(sec / 3600)
         local m = math.floor((sec % 3600) / 60)
@@ -833,7 +829,6 @@ if MODE == "OVERLAY" then
         end
     end)
 
-    -- RightControl toggle
     UserInputService.InputBegan:Connect(function(input, gpe)
         if gpe then return end
         if input.KeyCode == Enum.KeyCode.RightControl then
@@ -841,7 +836,7 @@ if MODE == "OVERLAY" then
         end
     end)
 
-    print("[Ozemen] Overlay mode: ข้อความกลางจอเท่านั้น (ไม่มี UI)")
+    print("[Ozemen] ✅ Overlay mode: ข้อความกลางจอเท่านั้น (ไม่มี UI)")
 end
 
 -- ═══════ 14. CONFIG ENGINE ════════════════════════════════════════════════
@@ -1253,7 +1248,6 @@ if MODE == "UI" then
 
     minBtn.Activated:Connect(toggleUI)
 
-    -- ═══ AUTO-START (UI mode) ═══
     if cfg("AutoStart", true) then
         task.wait(0.5)
         if cfg("StartHidden", true) then
@@ -1283,5 +1277,19 @@ if MODE == "UI" then
 
     Window:Notify("Ozemen Hub", "Anime Dice พร้อมใช้งาน | discord.gg/4Yg72kYT6s", 5)
 
-    print("[Ozemen] UI mode: หน้าต่าง EasyUI เท่านั้น (ไม่มี Overlay)")
+    print("[Ozemen] ✅ UI mode: หน้าต่าง EasyUI เท่านั้น (ไม่มี Overlay)")
 end
+
+-- ═══════ 16. รายงานสรุปโหมด ═══════
+task.spawn(function()
+    task.wait(1)
+    print("══════════════════════════════════════════════════")
+    print("  [Ozemen] สรุปโหมดที่ใช้งาน")
+    print("  MODE:", MODE)
+    if MODE == "UI" then
+        print("  → แสดง UI เท่านั้น (ไม่มี Overlay)")
+    elseif MODE == "OVERLAY" then
+        print("  → แสดง Overlay กลางจอเท่านั้น (ไม่มี UI)")
+    end
+    print("══════════════════════════════════════════════════")
+end)
