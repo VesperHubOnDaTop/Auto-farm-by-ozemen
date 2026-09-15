@@ -18,21 +18,14 @@ local function cfg(k, d) return (CFG[k] ~= nil) and CFG[k] or d end
 
 local HAS_CONFIG = (type(CFG) == "table") and (next(CFG) ~= nil)
 
--- ★★★ DEBUG: แสดงค่า ShowUI จริง ๆ
 print("[Ozemen] Config.ShowUI raw value:", tostring(CFG.ShowUI), "type:", type(CFG.ShowUI))
 
--- ★★★ MODE logic — fix ให้ชัดเจน
 local MODE = "UI"
 if HAS_CONFIG then
     local showUI = CFG.ShowUI
     if showUI == false then
         MODE = "OVERLAY"
-    elseif showUI == true then
-        MODE = "UI"
-    elseif showUI == nil then
-        MODE = "UI"
     else
-        -- ค่าอื่น ๆ (string, number) → ถือว่า UI
         MODE = "UI"
     end
 end
@@ -94,7 +87,7 @@ local UpdateAutoSellRE = SellNetwork and SellNetwork:FindFirstChild("RE") and Se
 
 -- ═══════ MODULES ═══════
 local DataController    = require(RS.Framework.Features.Data.DataController)
-local BuffController    = require(RS.Framework.Features.Buff.BuffController)
+local BuffController    = nil
 pcall(function() BuffController = require(RS.Framework.Features.Buffs.BuffController) end)
 local UnitUtil          = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil)
 local EntryRegistry     = require(RS.Framework.Features.Inventory.EntryRegistry)
@@ -547,8 +540,10 @@ task.spawn(function()
             end)
             local dur = 1.9
             pcall(function()
-                local d = BuffController.GetBuff("Roll Duration")
-                if type(d)=="number" and d>0 then dur = d end
+                if BuffController and BuffController.GetBuff then
+                    local d = BuffController.GetBuff("Roll Duration")
+                    if type(d)=="number" and d>0 then dur = d end
+                end
             end)
             if os.clock()-lastRoll >= dur+0.1 then
                 lastRoll = os.clock()
@@ -797,7 +792,6 @@ if MODE == "OVERLAY" then
             local screen = tower:FindFirstChild("Screen")
             if not screen then return end
 
-            -- ★ วิธี 1: Screen.Floor
             local floorLbl = screen:FindFirstChild("Floor")
             if floorLbl and floorLbl:IsA("TextLabel") then
                 local num = floorLbl.Text:match("(%d+)")
@@ -807,7 +801,6 @@ if MODE == "OVERLAY" then
                 end
             end
 
-            -- ★ วิธี 2: Screen.Label (fallback)
             local labelLbl = screen:FindFirstChild("Label")
             if labelLbl and labelLbl:IsA("TextLabel") then
                 local num = labelLbl.Text:match("(%d+)")
@@ -817,7 +810,6 @@ if MODE == "OVERLAY" then
                 end
             end
 
-            -- ★ วิธี 3: หา TextLabel ชื่อ "Floor" ใน Screen
             for _, child in ipairs(screen:GetDescendants()) do
                 if child:IsA("TextLabel") and child.Name == "Floor" then
                     local num = child.Text:match("(%d+)")
