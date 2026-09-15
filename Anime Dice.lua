@@ -1,6 +1,58 @@
 --[[
     OZEMEN HUB × ANIME DICE — v2.1 (Bug Fixed)
     Discord: https://discord.gg/4Yg72kYT6s
+
+    ═══════════════════════════════════════════════════════════
+    ★ CONFIG — ตั้งค่าได้ 2 ทาง:
+    1) คอนฟิกไฟล์ → ใส่ในโฟลเดอร์ "Ozemen/AnimeDice" (หน้า UI)
+    2) ตัวแปร → ตั้ง getgenv().AnimeDiceConfig = { ... } ก่อนรัน
+
+    ตารางคีย์ที่ใช้ (ชื่อคีย์ = ตรงตาม getgenv().AnimeDiceConfig):
+
+    ShowUI          = false   -- true=เปิด UI  | false=Overlay กลางจอ
+    AntiAFK         = true    -- ป้องกันหลุด 24/7
+    FpsBoost        = true    -- ลดคุณภาพกราฟิก เพิ่ม FPS
+    HideCutscene    = true    -- ซ่อน Cutscene สุ่มเต๋า
+
+    -- แท่นเงิน / สุ่มเต๋า
+    AutoCollect     = true    -- ดูดเงินอัตโนมัติ
+    CollectInterval = 0.5     -- ความถี่ดูดเงิน (วิ)   [0.5 แนะนำ]
+    AutoEquipBest   = true    -- ใส่ตัวเก่งสุดอัตโนมัติ
+    AutoLevelUnit   = true    -- อัปเลเวลหน่วยอัตโนมัติ
+    MaxUnitLevel    = 20      -- เพดานเลเวล (เก็บเงินเผื่อจุติ)  [20 แนะนำ]
+    AutoRoll        = true    -- สุ่มเต๋าอัตโนมัติ
+
+    -- จุติ / อัปเกรด / รางวัล
+    AutoRebirth     = true    -- จุติอัตโนมัติ
+    RebirthTarget   = 999     -- เพดานจุติ
+    AutoUpgrade     = true    -- ซื้ออัปเกรดอัตโนมัติ
+    AutoDice        = true    -- ซื้อเต๋าใหม่
+    AutoReward      = true    -- รับของฟรีทั้งหมด
+    AutoQuest       = true    -- รับเควสที่ทำครบ
+    AutoBoost       = true    -- ใช้น้ำยา tier สูงสุด
+
+    -- ขาย / Smart Trash
+    AutoSell        = true    -- ขายอัตโนมัติ
+    AutoFilterTrash = true    -- ไต่ tier อัตโนมัติ
+    TrashUpgradeAt  = 5       -- ไต่ tier เมื่อมีกี่ตัว  [5 แนะนำ]
+    TrashStartTier  = "Common"-- tier เริ่มต้นหลังจุติ
+    SellKeepBuffer  = 6       -- เหลือที่ว่างขั้นต่ำในคลัง
+    SellKeepIncome  = 1000000 -- เก็บตัวที่มีรายได้เกินนี้ (มากกว่าไม่ขาย)
+
+    -- เว็บฮุก
+    WebhookURL      = ""      -- URL Discord webhook
+    WebhookEnabled  = false   -- เปิด/ปิด
+
+    -- หอคอย
+    AutoTower       = true    -- ลงหอคอยอัตโนมัติ
+    TowerMode       = "auto"  -- auto | Dragon|Cursed|Pirate|Hidden Leaf|Infinity Tower
+
+    -- เทรด (ยังไม่สมบูรณ์ — เกมเปลี่ยน Remote เป็น ChangeOffer)
+    AutoTrade       = false
+    TradeHost       = {}      -- เช่น {"PlayerName1","PlayerName2"}
+    TradeSendMode   = "none"  -- none | keep_slotted | all
+
+    ═══════════════════════════════════════════════════════════
 ]]
 
 if _G.OzemenCleanup then pcall(_G.OzemenCleanup) end
@@ -304,7 +356,7 @@ local function sellSelectedUnits()
         if storageUsed < 20 then return end
 
         local plotted = {}
-        for slot = 1, 13 do
+        for slot = 1, 14 do
             local s = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
             if s and s.unitId then plotted[s.unitId] = true end
         end
@@ -388,15 +440,23 @@ local function emergencySell()
         if not SellInventoryRF or not DataController then return end
 
         local storageUsed = getStorageCount()
-        if storageUsed < 148 then return end  -- ★ เกินหรือใกล้เกิน
+        -- ★ Dynamic storage max (buff) — fallback 150
+        local maxStorage = 150
+        pcall(function()
+            if BuffController and BuffController.GetBuff then
+                local s = BuffController.GetBuff("Unit Storage")
+                if type(s) == "number" and s > 0 then maxStorage = s end
+            end
+        end)
+        if storageUsed < maxStorage - 2 then return end  -- ★ เกินหรือใกล้เกิน
 
-        print(string.format("[Trash] 🚨 Storage %d/150 — Emergency Sell!", storageUsed))
+        print(string.format("[Trash] 🚨 Storage %d/%d — Emergency Sell!", storageUsed, maxStorage))
 
         local inv = DataController.Inventory and DataController.Inventory()
         if not inv then return end
 
         local plotted = {}
-        for slot = 1, 13 do
+        for slot = 1, 14 do
             local s = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
             if s and s.unitId then plotted[s.unitId] = true end
         end
@@ -490,7 +550,7 @@ local State = {
 -- ═══════ CORE LOGIC ═══════
 local function collectAllSlots()
     pcall(function()
-        for slot = 1, 13 do PlotService.RE.CollectBalance:FireServer(slot) end
+        for slot = 1, 14 do PlotService.RE.CollectBalance:FireServer(slot) end
     end)
 end
 
@@ -504,7 +564,7 @@ local function levelUpAllSlots()
         local curMoney = DataController.Money and DataController.Money()
         if not curMoney or curMoney <= 0 then return end
         local targetLvl = tonumber(State.TargetUnitLevel) or 20
-        for slot = 1, 13 do
+        for slot = 1, 14 do
             local slotData = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
             if slotData and slotData.unitId then
                 local unitData = DataController.Inventory[slotData.unitId] and DataController.Inventory[slotData.unitId]()
@@ -962,7 +1022,7 @@ task.spawn(function()
                     for id in pairs(inv) do table.insert(toSend, id) end
                 elseif State.TradeSendMode == "keep_slotted" then
                     local slotted = {}
-                    for s=1,13 do
+                    for s=1,14 do
                         local sd = DataController.Slots[tostring(s)] and DataController.Slots[tostring(s)]()
                         if sd and sd.unitId then slotted[sd.unitId]=true end
                     end
@@ -1164,6 +1224,14 @@ if MODE == "OVERLAY" then
                     local towerName = resolveAutoTowerName()
                     local runtime = formatTime(os.clock() - (State.SessionStart or 0))
 
+                    local maxStorage = 150
+                    pcall(function()
+                        if BuffController and BuffController.GetBuff then
+                            local s = BuffController.GetBuff("Unit Storage")
+                            if type(s) == "number" and s > 0 then maxStorage = s end
+                        end
+                    end)
+
                     local moneyStr   = "$" .. NumberFormatter.FormatCompact(money)
                     local incomeStr  = "$" .. NumberFormatter.FormatCompact(income) .. "/s"
 
@@ -1193,11 +1261,11 @@ if MODE == "OVERLAY" then
                         "💎 เพชร: <font color='#FF7AD9'>%d</font>   🎫 Trait Reroll: <font color='#FFD700'>%d</font>\n"..
                         "🔄 Rebirth: <font color='#FFD700'>%d</font>   🎯 เต๋า: <font color='#00E5FF'>%s</font>\n"..
                         "🗼 Tower: <font color='#A0E7FF'>%s</font>\n"..
-                        "📦 Storage: <font color='#FF7AD9'>%d / 150</font>\n"..
+                        "📦 Storage: <font color='#FF7AD9'>%d / %d</font>\n"..
                         "🎰 Rolls: <font color='#FFD700'>%d</font>\n"..
                         "🤝 Trade: <font color='#A0E7FF'>%s</font>",
                         runtime, moneyStr, incomeStr, gems, traitReroll,
-                        rebirth, dice, towerDisplay, unitCount, rolls, tradeStatus
+                        rebirth, dice, towerDisplay, unitCount, maxStorage, rolls, tradeStatus
                     )
                 end)
             end
