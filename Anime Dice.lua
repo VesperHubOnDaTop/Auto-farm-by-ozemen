@@ -22,8 +22,7 @@ print("[Ozemen] Config.ShowUI raw value:", tostring(CFG.ShowUI), "type:", type(C
 
 local MODE = "UI"
 if HAS_CONFIG then
-    local showUI = CFG.ShowUI
-    if showUI == false then
+    if CFG.ShowUI == false then
         MODE = "OVERLAY"
     else
         MODE = "UI"
@@ -85,33 +84,64 @@ local SellNetwork      = network:FindFirstChild("SellService")
 local SellInventoryRF  = SellNetwork and SellNetwork:FindFirstChild("RF") and SellNetwork.RF:FindFirstChild("SellInventory")
 local UpdateAutoSellRE = SellNetwork and SellNetwork:FindFirstChild("RE") and SellNetwork.RE:FindFirstChild("UpdateAutoSell")
 
--- ═══════ MODULES ═══════
-local DataController    = require(RS.Framework.Features.Data.DataController)
-local BuffController    = nil
-pcall(function() BuffController = require(RS.Framework.Features.Buffs.BuffController) end)
-local UnitUtil          = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil)
-local EntryRegistry     = require(RS.Framework.Features.Inventory.EntryRegistry)
-local TreeStructure     = require(RS.Framework.Features.Upgrades.TreeStructure)
-local RebirthsModule    = require(RS.Framework.Features.Rebirth.Rebirths)
-local UpgradesModule    = require(RS.Framework.Features.Upgrades.Upgrades)
-local DiceModule        = require(RS.Framework.Features.Rolling.Dice)
-local GroupRewardConfig = require(RS.Framework.Features.Rewards.GroupRewardConfig)
-local NumberFormatter   = require(RS.Packages.NumberFormatter)
+-- ═══════ MODULES (wrap ทุกตัวเพื่อกัน error จาก module เกม) ═══════
+local function safeRequire(path)
+    if not path then return nil end
+    local ok, mod = pcall(function() return require(path) end)
+    if ok then return mod end
+    return nil
+end
 
-local httpRequest = (request or http_request or (syn and syn.request) or (http and http.request))
+local DataController    = safeRequire(RS.Framework.Features.Data.DataController)
+local BuffController    = safeRequire(RS.Framework.Features.Buffs.BuffController)
+local UnitUtil          = safeRequire(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil)
+local EntryRegistry     = safeRequire(RS.Framework.Features.Inventory.EntryRegistry)
+local TreeStructure     = safeRequire(RS.Framework.Features.Upgrades.TreeStructure)
+local RebirthsModule    = safeRequire(RS.Framework.Features.Rebirth.Rebirths)
+local UpgradesModule    = safeRequire(RS.Framework.Features.Upgrades.Upgrades)
+local DiceModule        = safeRequire(RS.Framework.Features.Rolling.Dice)
+local GroupRewardConfig = safeRequire(RS.Framework.Features.Rewards.GroupRewardConfig)
+local NumberFormatter   = safeRequire(RS.Packages.NumberFormatter)
 
-local TowerController = nil
-pcall(function() TowerController = require(RS.Framework.Features.Towers.TowerController) end)
-local UIReferences    = nil
-pcall(function() UIReferences    = require(RS.Framework.Features.UI.UIReferences) end)
+-- ★ Fallback NumberFormatter ถ้าโหลดไม่ได้
+if not NumberFormatter then
+    NumberFormatter = {
+        FormatCompact = function(n)
+            n = tonumber(n) or 0
+            if n >= 1e12 then return string.format("%.1ft", n/1e12)
+            elseif n >= 1e9 then return string.format("%.1fb", n/1e9)
+            elseif n >= 1e6 then return string.format("%.1fm", n/1e6)
+            elseif n >= 1e3 then return string.format("%.1fk", n/1e3)
+            else return tostring(math.floor(n)) end
+        end
+    }
+end
+
+local TowerController = safeRequire(RS.Framework.Features.Towers.TowerController)
+local UIReferences    = safeRequire(RS.Framework.Features.UI.UIReferences)
+
+-- ★ Report modules
+print("[Ozemen] Modules:",
+    "DC="..tostring(DataController~=nil),
+    "Buff="..tostring(BuffController~=nil),
+    "Unit="..tostring(UnitUtil~=nil),
+    "Entry="..tostring(EntryRegistry~=nil),
+    "Tree="..tostring(TreeStructure~=nil),
+    "Reb="..tostring(RebirthsModule~=nil),
+    "Upg="..tostring(UpgradesModule~=nil),
+    "Dice="..tostring(DiceModule~=nil),
+    "Group="..tostring(GroupRewardConfig~=nil),
+    "NF="..tostring(NumberFormatter~=nil))
 
 -- ═══════ ACCESSORS ═══════
 local function getX(key)
-    return DataController.___X and DataController.___X[key] or nil
+    if not DataController or not DataController.___X then return nil end
+    return DataController.___X[key] or nil
 end
 
 local function callSignal(name)
-    local sig = DataController.___C and DataController.___C[name]
+    if not DataController or not DataController.___C then return nil end
+    local sig = DataController.___C[name]
     if type(sig) ~= "table" then return nil end
     local mt = getmetatable(sig)
     if mt and type(mt.__call) == "function" then
@@ -206,14 +236,15 @@ end
 
 local function levelUpAllSlots()
     pcall(function()
-        local curMoney = DataController.Money()
+        if not DataController then return end
+        local curMoney = DataController.Money and DataController.Money()
         if not curMoney or curMoney <= 0 then return end
         local targetLvl = tonumber(State.TargetUnitLevel) or 20
         for slot = 1, 13 do
             local slotData = DataController.Slots[tostring(slot)] and DataController.Slots[tostring(slot)]()
             if slotData and slotData.unitId then
                 local unitData = DataController.Inventory[slotData.unitId] and DataController.Inventory[slotData.unitId]()
-                if unitData then
+                if unitData and UnitUtil and UnitUtil.GetLevelPrice then
                     local curLvl = (unitData.attributes and unitData.attributes.level) or 1
                     if curLvl < targetLvl then
                         local price = UnitUtil.GetLevelPrice(unitData.name, unitData.attributes)
@@ -230,6 +261,7 @@ end
 
 local function checkAndRebirth()
     pcall(function()
+        if not DataController or not RebirthsModule then return end
         local cur = DataController.Rebirth()
         local target = tonumber(State.TargetRebirth) or 999
         if cur >= target then return end
@@ -244,7 +276,7 @@ end
 local function sellSelectedUnits()
     local sold, earned = 0, 0
     pcall(function()
-        if not SellInventoryRF then return end
+        if not SellInventoryRF or not DataController then return end
         local inv = DataController.Inventory and DataController.Inventory()
         if not inv then return end
         local plotted = {}
@@ -279,7 +311,7 @@ local function sellSelectedUnits()
                 if State.SellKeepBuffer and State.SellKeepBuffer > 0 and storageUsed <= State.SellKeepBuffer then
                     canSell = false
                 end
-                if canSell then
+                if canSell and EntryRegistry then
                     local c = EntryRegistry.getEntryConfig(unit.name)
                     local rarity = (c and c.rarity) or "Unknown"
                     local match = false
@@ -312,6 +344,7 @@ local function rollGradeForSelectedUnit()
     local ok = false
     pcall(function()
         if not RollGradeRE or not State.TargetGradeUnitKey or State.TargetGradeUnitKey=="" then return end
+        if not DataController then return end
         local inv = DataController.Inventory
         if not inv then return end
         local unit = inv[State.TargetGradeUnitKey] and inv[State.TargetGradeUnitKey]()
@@ -327,7 +360,7 @@ end
 
 local function buyPrioritizedUpgrades()
     pcall(function()
-        if not UpgradesModule or not TreeStructure then return end
+        if not UpgradesModule or not TreeStructure or not DataController then return end
         local money = DataController.Money()
         if not money or money <= 0 then return end
         local avail = {}
@@ -368,7 +401,7 @@ end
 
 local function buyAffordableDice()
     pcall(function()
-        if not DiceModule then return end
+        if not DiceModule or not DataController then return end
         local all = DiceModule.GetAll()
         local money = DataController.Money()
         for name, data in pairs(all) do
@@ -386,7 +419,7 @@ local function claimAllFreebies()
         DailyRewardService.RE.Claim:FireServer()
         OfflineEarningsService.RE.Claim:FireServer()
         SpinService.RE.Use:FireServer()
-        if GroupRewardConfig and GroupRewardConfig.GroupId then
+        if GroupRewardConfig and GroupRewardConfig.GroupId and DataController then
             local inGroup = false
             pcall(function() inGroup = LP:IsInGroup(GroupRewardConfig.GroupId) end)
             if inGroup and DataController.ClaimedGroupReward and not DataController.ClaimedGroupReward() then
@@ -398,7 +431,7 @@ end
 
 local function resolveAutoTower()
     local money = 0
-    pcall(function() money = DataController.Money() or 0 end)
+    pcall(function() if DataController then money = DataController.Money() or 0 end end)
     if money >= 1e12 then return "Infinity Tower"
     elseif money >= 1e9 then return "Pirate Tower"
     elseif money >= 1e6 then return "Cursed Tower"
@@ -536,7 +569,9 @@ task.spawn(function()
         task.wait(0.1)
         if State.AutoRoll then
             pcall(function()
-                if not DataController.AutoRoll() then RollService.RE.SetAutoRoll:FireServer(true) end
+                if DataController and not DataController.AutoRoll() then
+                    RollService.RE.SetAutoRoll:FireServer(true)
+                end
             end)
             local dur = 1.9
             pcall(function()
@@ -551,7 +586,9 @@ task.spawn(function()
             end
         else
             pcall(function()
-                if DataController.AutoRoll() then RollService.RE.SetAutoRoll:FireServer(false) end
+                if DataController and DataController.AutoRoll() then
+                    RollService.RE.SetAutoRoll:FireServer(false)
+                end
             end)
         end
     end
@@ -610,7 +647,7 @@ task.spawn(function()
                 local SendRE = TS:FindFirstChild("RE") and TS.RE:FindFirstChild("Send")
                 if not SendRE then return end
                 local toSend = {}
-                local inv = DataController.Inventory and DataController.Inventory()
+                local inv = DataController and DataController.Inventory and DataController.Inventory()
                 if type(inv) ~= "table" then return end
                 if State.TradeSendMode == "all" then
                     for id in pairs(inv) do table.insert(toSend, id) end
@@ -733,7 +770,7 @@ if MODE == "OVERLAY" then
         return 0
     end
 
-    -- ★★★ รายได้รวม
+    -- ★ รายได้รวม — อ่านจาก UnitInfo.Income
     local function getBaseIncome()
         local total = 0
         pcall(function()
@@ -779,7 +816,7 @@ if MODE == "OVERLAY" then
         return total
     end
 
-    -- ★★★ ชั้น Tower — มี Caching
+    -- ★ ชั้น Tower — มี Caching
     local cachedFloor = "?"
     local function getTowerFloor()
         pcall(function()
@@ -795,28 +832,19 @@ if MODE == "OVERLAY" then
             local floorLbl = screen:FindFirstChild("Floor")
             if floorLbl and floorLbl:IsA("TextLabel") then
                 local num = floorLbl.Text:match("(%d+)")
-                if num then
-                    cachedFloor = num
-                    return
-                end
+                if num then cachedFloor = num; return end
             end
 
             local labelLbl = screen:FindFirstChild("Label")
             if labelLbl and labelLbl:IsA("TextLabel") then
                 local num = labelLbl.Text:match("(%d+)")
-                if num then
-                    cachedFloor = num
-                    return
-                end
+                if num then cachedFloor = num; return end
             end
 
             for _, child in ipairs(screen:GetDescendants()) do
                 if child:IsA("TextLabel") and child.Name == "Floor" then
                     local num = child.Text:match("(%d+)")
-                    if num then
-                        cachedFloor = num
-                        return
-                    end
+                    if num then cachedFloor = num; return end
                 end
             end
         end)
@@ -1112,10 +1140,11 @@ if MODE == "UI" then
     local function getInvUnitOptions()
         local opts, map = {}, {}
         pcall(function()
+            if not DataController then return end
             local inv = DataController.Inventory and DataController.Inventory()
             if not inv then return end
             for id, item in pairs(inv) do
-                if type(item)=="table" and item.name then
+                if type(item)=="table" and item.name and EntryRegistry then
                     local c = EntryRegistry.getEntryConfig(item.name)
                     if c and c.kind=="Unit" then
                         local g = (item.attributes and item.attributes.grade) or "D"
